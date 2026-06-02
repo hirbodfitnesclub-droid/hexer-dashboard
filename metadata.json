@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Hexer Admin Dashboard",
+  "description": "پنل مدیریت اختصاصی، لوکس و راست‌چین پلتفرم هکسر برای مدیریت کاربران، اشتراک‌ها، پرداخت‌ها و کدهای تخفیف",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
