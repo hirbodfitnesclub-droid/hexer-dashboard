@@ -8,6 +8,7 @@ import { UserGrowthChart } from '../components/charts/UserGrowthChart';
 import { PlanDistributionChart } from '../components/charts/PlanDistributionChart';
 import { RecentPayments } from '../components/ui/RecentPayments';
 import { Card } from '../components/ui/Card';
+import { PLAN_CONFIGS } from '../lib/constants';
 import { 
   Users, 
   CreditCard, 
@@ -108,29 +109,18 @@ export const Dashboard: React.FC = () => {
     : [{ date: 'امروز', count: 0 }];
 
   // Group plans distribution (using both plan_code and plan_id defensively)
-  const planDistribution = [
-    { 
-      name: 'پلن آزمایشی (رایگان)', 
+  const planDistribution = Object.entries(PLAN_CONFIGS).map(([key, config]) => {
+    return {
+      name: key === 'free' ? 'پلن آزمایشی (رایگان)' : `پلن ${config.name}`,
       value: subscriptions.filter(s => {
         const code = ((s as any).plan_code || s.plan_id || '').toLowerCase();
-        return code === 'free' || code === 'free-trial';
-      }).length 
-    },
-    { 
-      name: 'پلن پلاس', 
-      value: subscriptions.filter(s => {
-        const code = ((s as any).plan_code || s.plan_id || '').toLowerCase();
-        return code === 'plus';
-      }).length 
-    },
-    { 
-      name: 'پلن پرو (حرفه‌ای)', 
-      value: subscriptions.filter(s => {
-        const code = ((s as any).plan_code || s.plan_id || '').toLowerCase();
-        return code === 'pro';
-      }).length 
-    },
-  ];
+        if (key === 'free') {
+          return code === 'free' || code === 'free-trial';
+        }
+        return code === key;
+      }).length
+    };
+  });
 
   // Calculate real trends comparing past 7 days vs 7 days prior
   const now = new Date();

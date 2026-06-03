@@ -9,6 +9,7 @@ import { Input } from '../components/ui/Input';
 import { CreditCard, Search, ShieldCheck, TicketCheck } from 'lucide-react';
 import { motion } from 'motion/react';
 import toast from 'react-hot-toast';
+import { PLAN_CONFIGS } from '../lib/constants';
 
 export const SubscriptionsManager: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -123,11 +124,11 @@ export const SubscriptionsManager: React.FC = () => {
         <div id="sub-filters" className="lg:col-span-6 flex flex-wrap sm:flex-nowrap gap-2 items-center justify-end">
           
           {/* Plan Filter Selector */}
-          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-1 w-full sm:w-auto">
+          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-1 w-full sm:w-auto overflow-x-auto">
             <button
               id="plan-filter-all"
               onClick={() => setActivePlanFilter('all')}
-              className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                 activePlanFilter === 'all'
                   ? 'bg-slate-800 text-white'
                   : 'text-slate-500 hover:text-slate-300'
@@ -135,39 +136,20 @@ export const SubscriptionsManager: React.FC = () => {
             >
               همه پلن‌ها
             </button>
-            <button
-              id="plan-filter-free"
-              onClick={() => setActivePlanFilter('free')}
-              className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
-                activePlanFilter === 'free'
-                  ? 'bg-slate-500/10 text-slate-400'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              رایگان
-            </button>
-            <button
-              id="plan-filter-plus"
-              onClick={() => setActivePlanFilter('plus')}
-              className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
-                activePlanFilter === 'plus'
-                  ? 'bg-purple-500/10 text-purple-400'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              پلاس
-            </button>
-            <button
-              id="plan-filter-pro"
-              onClick={() => setActivePlanFilter('pro')}
-              className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
-                activePlanFilter === 'pro'
-                  ? 'bg-[#4a6bf2]/10 text-[#4a6bf2]'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              پرو
-            </button>
+            {Object.entries(PLAN_CONFIGS).map(([key, config]) => (
+              <button
+                id={`plan-filter-${key}`}
+                key={key}
+                onClick={() => setActivePlanFilter(key)}
+                className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  activePlanFilter === key
+                    ? config.filterClass
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {config.name}
+              </button>
+            ))}
           </div>
 
           {/* Status Filter selector row */}

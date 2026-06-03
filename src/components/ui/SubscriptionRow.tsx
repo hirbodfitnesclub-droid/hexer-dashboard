@@ -2,7 +2,8 @@ import React from 'react';
 import { Subscription } from '../../lib/supabase';
 import { Badge } from './Badge';
 import { UserAvatar } from './UserAvatar';
-import { Award, Zap, Shield, Edit } from 'lucide-react';
+import { Edit } from 'lucide-react';
+import { PLAN_CONFIGS } from '../../lib/constants';
 
 interface SubscriptionRowProps {
   subscription: Subscription;
@@ -13,32 +14,6 @@ export const SubscriptionRow: React.FC<SubscriptionRowProps> = ({
   subscription,
   onEdit,
 }) => {
-  const getPlanBadge = (planId: string) => {
-    switch (planId) {
-      case 'plus':
-        return (
-          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-lg text-xs font-bold">
-            <Shield className="w-3.5 h-3.5 text-purple-400 pointer-events-none" />
-            <span>پلاس</span>
-          </span>
-        );
-      case 'pro':
-        return (
-          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 bg-brand-500/10 text-brand-400 border border-brand-500/20 rounded-lg text-xs font-bold">
-            <Zap className="w-3.5 h-3.5 text-brand-400 pointer-events-none" />
-            <span>پرو</span>
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 bg-slate-800 text-slate-400 border border-slate-700 rounded-lg text-xs font-bold">
-            <Award className="w-3.5 h-3.5 text-slate-500 pointer-events-none" />
-            <span>آزمایشی</span>
-          </span>
-        );
-    }
-  };
-
   const getStatusBadge = (status: 'active' | 'expired' | 'canceled') => {
     switch (status) {
       case 'active':
@@ -72,7 +47,16 @@ export const SubscriptionRow: React.FC<SubscriptionRowProps> = ({
         </div>
       </td>
       <td className="py-4 text-right">
-        {getPlanBadge(subscription.plan_id)}
+        {(() => {
+          const config = PLAN_CONFIGS[subscription.plan_id] || PLAN_CONFIGS['free'];
+          const Icon = config.icon;
+          return (
+            <span className={`inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 ${config.badgeClass} rounded-lg text-xs font-bold`}>
+              <Icon className="w-3.5 h-3.5 pointer-events-none" />
+              <span>{config.name}</span>
+            </span>
+          );
+        })()}
       </td>
       <td className="py-4 text-right">
         {getStatusBadge(subscription.status)}

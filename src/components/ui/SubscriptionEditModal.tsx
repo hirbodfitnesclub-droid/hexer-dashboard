@@ -3,7 +3,8 @@ import { Subscription, Plan } from '../../lib/supabase';
 import { ModalWrapper } from './ModalWrapper';
 import { Input } from './Input';
 import { Button } from './Button';
-import { Award, Zap, Shield, CalendarDays } from 'lucide-react';
+import { CalendarDays } from 'lucide-react';
+import { PLAN_CONFIGS } from '../../lib/constants';
 
 interface SubscriptionEditModalProps {
   isOpen: boolean;
@@ -79,9 +80,11 @@ export const SubscriptionEditModal: React.FC<SubscriptionEditModalProps> = ({
         {/* Plan Type Grid Options */}
         <div id="plan-selection-grid" className="space-y-2">
           <label className="text-xs font-bold text-slate-300">انتخاب پلن اشتراکی هوش مصنوعی</label>
-          <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {plans.map((p) => {
               const isSelected = selectedPlanId === p.id;
+              const config = PLAN_CONFIGS[p.id] || PLAN_CONFIGS['free'];
+              const Icon = config.icon;
               return (
                 <button
                   id={`plan-btn-option-${p.id}`}
@@ -94,13 +97,7 @@ export const SubscriptionEditModal: React.FC<SubscriptionEditModalProps> = ({
                       : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-705'
                   }`}
                 >
-                  {p.id === 'plus' ? (
-                    <Shield className={`w-4 h-4 ${isSelected ? 'text-brand-400' : 'text-slate-500'}`} />
-                  ) : p.id === 'pro' ? (
-                    <Zap className={`w-4 h-4 ${isSelected ? 'text-brand-400' : 'text-slate-500'}`} />
-                  ) : (
-                    <Award className={`w-4 h-4 ${isSelected ? 'text-brand-400' : 'text-slate-500'}`} />
-                  )}
+                  <Icon className={`w-4 h-4 ${isSelected ? 'text-brand-400' : 'text-slate-500'}`} />
                   <span>{p.name}</span>
                 </button>
               );
