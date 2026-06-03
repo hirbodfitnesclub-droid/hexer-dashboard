@@ -67,30 +67,148 @@ export const Dashboard: React.FC = () => {
 
   const activePromoCodes = discounts.filter(dis => dis.is_active).length;
 
-  // Chart Formatting Helper
-  // Revenue by Month or Week
-  const revenueChartData = [
-    { date: '۱۲ اردیبهشت', amount: 350000 },
-    { date: '۱۸ اردیبهشت', amount: 590000 },
-    { date: '۲۲ اردیبهشت', amount: 420000 },
-    { date: '۲۸ اردیبهشت', amount: 920000 },
-    { date: '۰۱ خرداد', amount: totalRevenue > 0 ? totalRevenue : 1240000 },
-  ];
+  // Modern Date/Time grouping with Intl API (toLocaleDateString)
+  // Revenue grouped by Persian date representation
+  const successPayments = [...payments]
+    .filter(pay => pay.status === 'success')
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  const userGrowthData = [
-    { date: '۱۵ اردیبهشت', count: 12 },
-    { date: '۱۸ اردیبهشت', count: 19 },
-    { date: '۲۲ اردیبهشت', count: 28 },
-    { date: '۲۸ اردیبهشت', count: 42 },
-    { date: '۰۱ خرداد', count: totalUsers },
-  ];
+  const revenueDateMap = new Map<string, number>();
+  successPayments.forEach(pay => {
+    const dateObj = new Date(pay.created_at);
+    const dateStr = dateObj.toLocaleDateString('fa-IR', {
+      month: 'long',
+      day: 'numeric'
+    });
+    revenueDateMap.set(dateStr, (revenueDateMap.get(dateStr) || 0) + pay.amount);
+  });
 
-  // Group plans distribution
+  const revenueChartData = revenueDateMap.size > 0 
+    ? Array.from(revenueDateMap.entries()).map(([date, amount]) => ({ date, amount }))
+    : [{ date: 'امروز', amount: 0 }];
+
+  // Cumulative User Growth grouped by signup date
+  const sortedProfiles = [...profiles]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+  const userDateMap = new Map<string, number>();
+  let userCumulativeCount = 0;
+  sortedProfiles.forEach(prof => {
+    userCumulativeCount += 1;
+    const dateObj = new Date(prof.created_at);
+    const dateStr = dateObj.toLocaleDateString('fa-IR', {
+      month: 'long',
+      day: 'numeric'
+    });
+    userDateMap.set(dateStr, userCumulativeCount);
+  });
+
+  const userGrowthData = userDateMap.size > 0
+    ? Array.from(userDateMap.entries()).map(([date, count]) => ({ date, count }))
+    : [{ date: 'امروز', count: 0 }];
+
+  // Group plans distribution (using both plan_code and plan_id defensively)
   const planDistribution = [
-    { name: 'پلن آزمایشی (رایگان)', value: subscriptions.filter(s => s.plan_id === 'free').length },
-    { name: 'پلن پلاس', value: subscriptions.filter(s => s.plan_id === 'plus').length },
-    { name: 'پلن پرو (حرفه‌ای)', value: subscriptions.filter(s => s.plan_id === 'pro').length },
+    { 
+      name: 'پلن آزمایشی (رایگان)', 
+      value: subscriptions.filter(s => {
+        const code = ((s as any).plan_code || s.plan_id || '').toLowerCase();
+        return code === 'free' || code === 'free-trial';
+      }).length 
+    },
+    { 
+      name: 'پلن پلاس', 
+      value: subscriptions.filter(s => {
+        const code = ((s as any).plan_code || s.plan_id || '').toLowerCase();
+        return code === 'plus';
+      }).length 
+    },
+    { 
+      name: 'پلن پرو (حرفه‌ای)', 
+      value: subscriptions.filter(s => {
+        const code = ((s as any).plan_code || s.plan_id || '').toLowerCase();
+        return code === 'pro';
+      }).length 
+    },
   ];
+
+  // Calculate real trends comparing past 7 days vs 7 days prior
+  const now = new Date();
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
+
+  const calculateTrendForCount = (items: { created_at: string }[]) => {
+    const nowTime = now.getTime();
+    
+    const last7Days = items.filter(item => {
+      const itemTime = new Date(item.created_at).getTime();
+      return itemTime >= nowTime - SEVEN_DAYS_MS && itemTime <= nowTime;
+    }).length;
+
+    const prev7Days = items.filter(item => {
+      const itemTime = new Date(item.created_at).getTime();
+      return itemTime >= nowTime - 2 * SEVEN_DAYS_MS && itemTime < nowTime - SEVEN_DAYS_MS;
+    }).length;
+
+    if (prev7Days === 0) {
+      return {
+        value: last7Days > 0 ? 100 : 0,
+        isPositive: true,
+        label: 'نسبت به هفته پیش'
+      };
+    }
+
+    const percentageChange = Math.round(((last7Days - prev7Days) / prev7Days) * 1000) / 10;
+    return {
+      value: Math.abs(percentageChange),
+      isPositive: percentageChange >= 0,
+      label: 'نسبت به هفته پیش'
+    };
+  };
+
+  const calculateTrendForRevenue = (items: Payment[]) => {
+    const nowTime = now.getTime();
+
+    const last7DaysSum = items
+      .filter(pay => pay.status === 'success')
+      .filter(pay => {
+        const payTime = new Date(pay.created_at).getTime();
+        return payTime >= nowTime - SEVEN_DAYS_MS && payTime <= nowTime;
+      })
+      .reduce((sum, pay) => sum + pay.amount, 0);
+
+    const prev7DaysSum = items
+      .filter(pay => pay.status === 'success')
+      .filter(pay => {
+        const payTime = new Date(pay.created_at).getTime();
+        return payTime >= nowTime - 2 * SEVEN_DAYS_MS && payTime < nowTime - SEVEN_DAYS_MS;
+      })
+      .reduce((sum, pay) => sum + pay.amount, 0);
+
+    if (prev7DaysSum === 0) {
+      return {
+        value: last7DaysSum > 0 ? 100 : 0,
+        isPositive: true,
+        label: 'نسبت به هفته پیش'
+      };
+    }
+
+    const percentageChange = Math.round(((last7DaysSum - prev7DaysSum) / prev7DaysSum) * 1000) / 10;
+    return {
+      value: Math.abs(percentageChange),
+      isPositive: percentageChange >= 0,
+      label: 'نسبت به هفته پیش'
+    };
+  };
+
+  const usersTrend = calculateTrendForCount(profiles);
+  const subsTrend = calculateTrendForCount(subscriptions.filter(s => s.status === 'active'));
+  const revenueTrend = calculateTrendForRevenue(payments);
+  const discountsTrend = {
+    value: discounts.filter(d => !d.is_active || (d.expires_at && new Date(d.expires_at).getTime() < now.getTime())).length,
+    isPositive: false,
+    label: 'کدهای غیرفعال یا منقضی'
+  };
 
   return (
     <motion.div
@@ -129,7 +247,7 @@ export const Dashboard: React.FC = () => {
           title="کل کاربران هکسر"
           value={totalUsers}
           icon={Users}
-          trend={{ value: 14.5, isPositive: true, label: 'نسبت به هفته پیش' }}
+          trend={usersTrend}
           iconColorClass="text-brand-400 bg-brand-500/10"
         />
         <StatsCard
@@ -137,7 +255,7 @@ export const Dashboard: React.FC = () => {
           title="اشتراک‌های فعال"
           value={activeSubs}
           icon={CreditCard}
-          trend={{ value: 8.2, isPositive: true, label: 'نسبت به ماه پیش' }}
+          trend={subsTrend}
           iconColorClass="text-purple-400 bg-purple-500/10"
         />
         <StatsCard
@@ -145,7 +263,7 @@ export const Dashboard: React.FC = () => {
           title="کل درآمد کسب شده"
           value={`${totalRevenue.toLocaleString('fa-IR')} تومان`}
           icon={CircleDollarSign}
-          trend={{ value: 18.9, isPositive: true, label: 'نسبت به ماه پیش' }}
+          trend={revenueTrend}
           iconColorClass="text-emerald-400 bg-emerald-500/10"
         />
         <StatsCard
@@ -153,7 +271,7 @@ export const Dashboard: React.FC = () => {
           title="کدهای تخفیف فعال"
           value={activePromoCodes}
           icon={Tag}
-          trend={{ value: 2, isPositive: false, label: 'انقضا یافته امروز' }}
+          trend={discountsTrend}
           iconColorClass="text-amber-400 bg-amber-500/10"
         />
       </div>

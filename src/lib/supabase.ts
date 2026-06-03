@@ -1,17 +1,7 @@
+// Any needed supabase client-side library import
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || 'https://rvgiidesehuaqqncqilu.supabase.co';
-// Using the provided service role / bypass key for administrative dashboard operations
-const supabaseServiceKey = 'sb_secret_Pm6SKlUwTnaRCRlO1GTgzg_NjFpnkLb';
-
-export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-});
-
-// Helper types matching the database schema
+// Helper types matching the database schema and Gateway DTO outputs
 export interface Profile {
   id: string;
   email?: string;
@@ -23,7 +13,7 @@ export interface Profile {
 
 export interface Plan {
   id: string;
-  name: string; // e.g. "Free", "Pro", "Enterprise"
+  name: string;
   price: number;
   ai_tokens_limit: number;
 }
@@ -35,7 +25,6 @@ export interface Subscription {
   status: 'active' | 'expired' | 'canceled';
   expires_at: string | null;
   created_at: string;
-  // Included fields via join
   profiles?: Profile;
   plans?: Plan;
 }
@@ -51,7 +40,7 @@ export interface Payment {
 }
 
 export interface DiscountCode {
-  id: string;
+  id?: string; // اختیاری کردن شناسه در فرانت برای پاس دادن وظیفه تولید شناسه به دیتابیس
   code: string;
   discount_percent: number;
   max_uses: number;
@@ -60,3 +49,11 @@ export interface DiscountCode {
   is_active: boolean;
   created_at: string;
 }
+
+// Client-side publishable initialize
+const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL || 'https://rvgiidesehuaqqncqilu.supabase.co';
+const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+

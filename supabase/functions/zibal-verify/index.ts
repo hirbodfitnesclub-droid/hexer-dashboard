@@ -76,64 +76,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Checking if the transaction was marked as a zero-payment discount bypass
-    const isBypass = trackId.startsWith('free_bypass_') || paymentRecord.gateway === 'bypass' || paymentRecord.final_amount_irr === 0;
-
-    if (isBypass) {
-      const refNumber = `bypass_${paymentRecord.id}`;
-
-      // Call DB RPC to activate subscription and validate/increment discount code atomically
-      // This will invoke database checks and raise an exception if discount capacity is full (Guardrail 2)
-      const { data: activeSuccess, error: activeError } = await supabaseService.rpc('activate_subscription', {
-        p_user_id: paymentRecord.user_id,
-        p_plan_code: paymentRecord.plan_code,
-        p_payment_id: paymentRecord.id
-      });
-
-      if (activeError) {
-        console.error("Bypass activation RPC error:", activeError);
-        
-        // Update local order status to failed due to validation/capacity issues
-        await supabaseService
-          .from('payments')
-          .update({ status: 'failed' })
-          .eq('id', paymentRecord.id);
-
-        return new Response(JSON.stringify({
-          status: "failed",
-          error: activeError.message || "فعال‌سازی اشتراک تایید نشد."
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400
-        });
-      }
-
-      // Record transaction status as paid after successful RPC activation
-      const { error: updateError } = await supabaseService
-        .from('payments')
-        .update({
-          status: 'paid',
-          ref_number: refNumber,
-          paid_at: new Date().toISOString()
-        })
-        .eq('id', paymentRecord.id);
-
-      if (updateError) {
-        console.error("Local payment update success-state error:", updateError);
-        throw new Error("Failed to record transaction status as paid in local database");
-      }
-
-      return new Response(JSON.stringify({
-        status: "success",
-        plan_code: paymentRecord.plan_code,
-        refNumber: refNumber
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200
-      });
-    }
-
-    // Standard bank payment validation
     const merchant = Deno.env.get('ZIBAL_MERCHANT') || 'zibal';
 
     // 3. Dispatch verification request to Zibal gateway API
@@ -163,34 +105,7 @@ Deno.serve(async (req) => {
     if (isSuccess) {
       const refNumber = String(zibalResult.refNumber || "");
 
-      // 4a. Call DB RPC to activate subscription and validate/increment discount code atomically (Guardrail 2)
-      const { data: activeSuccess, error: activeError } = await supabaseService.rpc('activate_subscription', {
-        p_user_id: paymentRecord.user_id,
-        p_plan_code: paymentRecord.plan_code,
-        p_payment_id: paymentRecord.id
-      });
-
-      if (activeError) {
-        console.error("RPC activate_subscription failed:", activeError);
-
-        // Update local order status to failed because code capacity was filled
-        await supabaseService
-          .from('payments')
-          .update({ status: 'failed' })
-          .eq('id', paymentRecord.id);
-
-        // Refinement: Prevent Refund Blackhole. Since the user paid successfully, but the discount capacity expired, 
-        // return clean JSON with status 409 and clear Persian explanation guide.
-        return new Response(JSON.stringify({
-          status: "failed",
-          error: "پرداخت موفق بود اما ظرفیت کد تخفیف در حین پرداخت به پایان رسید. وجه پرداختی به حساب شما عودت داده خواهد شد."
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 409
-        });
-      }
-
-      // 4b. After successful transaction activation, update payment trace status to paid and log reference number
+      // 4a. Update status to paid and log reference number
       const { error: updateError } = await supabaseService
         .from('payments')
         .update({
@@ -203,6 +118,18 @@ Deno.serve(async (req) => {
       if (updateError) {
         console.error("Local payment update success-state error:", updateError);
         throw new Error("Failed to record transaction status as paid in local database");
+      }
+
+      // 4b. Call DB RPC to activate subscription and reset usage counters atomically
+      const { data: activeSuccess, error: activeError } = await supabaseService.rpc('activate_subscription', {
+        p_user_id: paymentRecord.user_id,
+        p_plan_code: paymentRecord.plan_code,
+        p_payment_id: paymentRecord.id
+      });
+
+      if (activeError) {
+        console.error("RPC activate_subscription failed:", activeError);
+        throw new Error(`Failed to activate subscription atomically in DB: ${activeError.message}`);
       }
 
       return new Response(JSON.stringify({

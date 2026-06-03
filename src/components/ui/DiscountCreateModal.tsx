@@ -55,7 +55,6 @@ export const DiscountCreateModal: React.FC<DiscountCreateModalProps> = ({
     const finalExpires = expiresAt ? new Date(expiresAt).toISOString() : null;
 
     const newDiscount: DiscountCode = {
-      id: `dis-${Math.random().toString(36).substring(2, 9)}`,
       code: code.trim().toUpperCase(),
       discount_percent: discountValue,
       max_uses: usages,

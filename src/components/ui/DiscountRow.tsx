@@ -72,7 +72,7 @@ export const DiscountRow: React.FC<DiscountRowProps> = ({
           {/* Delete code permanently */}
           <button
             id={`btn-delete-dis-${discount.id}`}
-            onClick={() => onDelete(discount.id)}
+            onClick={() => onDelete(discount.id!)}
             className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-400 hover:bg-rose-500/25 transition-all cursor-pointer"
             title="حذف کد تخفیف"
           >

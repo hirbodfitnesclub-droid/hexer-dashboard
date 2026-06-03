@@ -26,7 +26,7 @@ export default function App() {
             background: '#1e293b',
             color: '#f8fafc',
             border: '1px solid rgba(255,255,255,0.08)',
-            fontFamily: 'Vazirmatn, system-ui, sans-serif animate-pulse',
+            fontFamily: 'Vazirmatn, system-ui, sans-serif',
             fontSize: '13px',
             direction: 'rtl',
             borderRadius: '12px'
