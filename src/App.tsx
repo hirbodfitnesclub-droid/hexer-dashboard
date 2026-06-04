@@ -11,6 +11,7 @@ import { Dashboard } from './pages/Dashboard';
 import { UsersManager } from './pages/UsersManager';
 import { SubscriptionsManager } from './pages/SubscriptionsManager';
 import { DiscountsManager } from './pages/DiscountsManager';
+import { ManualPaymentsManager } from './pages/ManualPaymentsManager';
 import { Toaster } from 'react-hot-toast';
 
 export default function App() {
@@ -54,6 +55,7 @@ export default function App() {
           {activeTab === 'dashboard' && <Dashboard />}
           {activeTab === 'users' && <UsersManager />}
           {activeTab === 'subscriptions' && <SubscriptionsManager />}
+          {activeTab === 'manual_payments' && <ManualPaymentsManager />}
           {activeTab === 'discounts' && <DiscountsManager />}
         </AdminLayout>
       )}

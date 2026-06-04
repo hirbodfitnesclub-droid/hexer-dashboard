@@ -5,94 +5,102 @@
 
 ---
 
-## TASK 1 — افزودن ستون `is_active` به جدول کدهای تخفیف (Migration)
+## TASK 1 — افزودن ستون `is_active` به جدول کدهای تخفیف (Migration) [✅ انجام‌شده و تثبیت‌شده]
 
-**راهنمای پیاده‌سازی فنی:**
-1. فایل جدید `supabase/sql/24_admin_dashboard_patch.sql` ساخته شود (idempotent).
-2. `ALTER TABLE public.discount_codes ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;`
-3. (اختیاری) backfill: ردیف‌های منقضی‌شده می‌توانند `is_active = false` شوند؛ اما ساده نگه دارید — پیش‌فرض `true` کافی است.
-4. در انتهای فایل: `NOTIFY pgrst, 'reload schema';`
-
-**محدودیت‌های اختصاصی تسک:**
-- ✅ فقط همین یک ستون اضافه شود. ✅ فایل کاملاً idempotent باشد (`IF NOT EXISTS`).
-- ❌ هیچ فایل SQL موجودی ویرایش نشود. ❌ به مدل RLS دست نزنید. ❌ ستون‌های دیگر اضافه نکنید.
-- ⚠️ این فایل باید توسط مالک در SQL Editor سوپابیس اجرا شود (کدنویس فقط فایل را تولید می‌کند).
-
-CONTEXT_FILES: ["supabase/sql/23_add_discount_system.sql"]
+این تسک به‌طور کامل اجرا شده و در پایگاه داده تثبیت گشته است. نیازی به هیچ عملگر یا کدنویسی اضافی نیست.
 
 ---
 
-## TASK 2 — ساخت Edge Function به‌نام `admin-api` (Gateway امنِ ادمین)
+## TASK 2 — ریفکتور Edge Function ادمین برای رفع مشکل OOM [بدهی فنی بحرانی]
 
 **راهنمای پیاده‌سازی فنی:**
-1. فایل `supabase/functions/admin-api/index.ts` با الگوی `Deno.serve` ساخته شود (دقیقاً مطابق سبک `zibal-verify/index.ts`).
-2. هندل `OPTIONS` برای CORS (از `_shared/cors.ts`).
-3. در ابتدای هر درخواست: هدر `x-admin-secret` با `Deno.env.get('ADMIN_API_SECRET')` مقایسه شود؛ در صورت عدم تطابق → `401`.
-4. ساخت کلاینت: `createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)` (bypass RLS).
-5. بر اساس `body.action` روتینگ شود؛ تمام actionها طبق جدول ARCHITECTURE.md پیاده شوند:
-   - `list_profiles`: ردیف‌های `profiles` + فراخوانی `supabaseService.auth.admin.listUsers()` برای استخراج `email` و `banned_until`؛ ادغام در DTO با کلیدهای `{ id, display_name (=full_name), email, avatar_url, is_blocked (= banned_until در آینده), created_at }`.
-   - `update_profile`: آپدیت `profiles.full_name`؛ و برای مسدودسازی، `auth.admin.updateUserById(id, { ban_duration: is_blocked ? '876000h' : 'none' })`.
-   - `list_plans`: نگاشت `plan_code→id, display_name→name, price_irr→price, monthly_quota→ai_tokens_limit`.
-   - `list_subscriptions`: subscriptions + الصاق پروفایل و پلن سمت سرور؛ کلیدها `{ id, user_id, plan_id (=plan_code), status, expires_at, created_at (=started_at), profiles, plans }`.
-   - `upsert_subscription`: upsert در `subscriptions` با `onConflict: 'user_id'`.
-   - `list_payments`: payments + الصاق پروفایل + resolve کد تخفیف؛ `amount = amount_irr`، نگاشت `paid→success`، `coupon_code` از join.
-   - `list_discounts`: select مستقیم.
-   - `save_discount`: اگر idِ معتبر UUID نبود، آن را حذف کن و بگذار DB تولید کند؛ upsert با `onConflict: 'code'`.
-   - `delete_discount`: حذف بر اساس id.
-6. همه‌ی خروجی‌ها `{ ...corsHeaders, 'Content-Type': 'application/json' }` و کدهای وضعیت مناسب.
+کد فعلی در اکشن‌های `list_subscriptions` و `list_payments` در فایل `supabase/functions/admin-api/index.ts` کل جدول‌های `profiles`، `plans` و `discount_codes` را با `.select('*')` در رم سرور بارگذاری می‌کند که باعث نشت حافظه (OOM) می‌شود. از آنجا که رابطه کلید خارجی مستقیمی بین این جداول و `profiles` وجود ندارد، PostgREST Joins کار نمی‌کند.
+
+برنامه‌نویس **موظف است** این بخش‌ها را با تکنیک "واکشی هدفمند (Batch Querying)" بازنویسی کند:
+1. ابتدا تراکنش‌ها/سابسکریپشن‌ها واکشی شوند.
+2. با یک `Set`، شناسه‌های یکتای کاربران (`user_id`) استخراج شود.
+3. با استفاده از فیلتر `.in('id', userIds)`، **فقط** دیتای پروفایل‌های مربوط به همان کاربران واکشی شود (برای `discount_codes` نیز همین کار انجام شود).
+4. در نهایت در سرور مپ شده و به کلاینت ارسال شوند.
+5. **مهم:** فیلدهای حیاتی مانند `id` و `created_at` پروفایل‌ها نباید در خروجی نهایی DTO جا بیفتند.
 
 **محدودیت‌های اختصاصی تسک:**
-- ✅ فقط service_role در این فایل (سمت سرور). ✅ شکل خروجی **دقیقاً** منطبق با interfaceهای `src/lib/supabase.ts`.
-- ✅ مدیریت خطا با try/catch و پیام فارسی کوتاه.
-- ❌ هیچ تغییری در فرانت در این تسک انجام نشود. ❌ منطق پرداخت/Zibal لمس نشود. ❌ کلید secret هاردکد نشود؛ از `Deno.env` خوانده شود.
-- ⚠️ دیپلوی با `supabase functions deploy admin-api --no-verify-jwt` و ست‌کردن `ADMIN_API_SECRET` بر عهده‌ی مالک است.
+- ✅ رفع OOM فقط با متد `.in()`.
+- ❌ تلاش برای استفاده از PostgREST Joins (مثل `select('*, profiles(*)')`) اکیداً ممنوع است و باعث خطای پایگاه داده می‌شود.
+- ❌ تغییر در اسکیما یا فایل‌های SQL ممنوع است.
 
-CONTEXT_FILES: ["supabase/functions/zibal-verify/index.ts", "supabase/functions/_shared/cors.ts", "supabase/functions/_shared/auth-guard.ts", "src/lib/supabase.ts", "supabase/sql/01_profiles.sql", "supabase/sql/02_billing.sql", "supabase/sql/04_payments.sql", "supabase/sql/23_add_discount_system.sql"]
+CONTEXT_FILES: ["supabase/functions/admin-api/index.ts", "src/lib/supabase.ts"]
 
 ---
 
-## TASK 3 — بازنویسی لایه‌ی داده‌ی فرانت برای استفاده از Gateway
+## TASK 3 — حذف وابستگی کلاینت به SDK سوپابیس و ریفکتور dataStore [بدهی فنی]
 
 **راهنمای پیاده‌سازی فنی:**
-1. `src/lib/supabase.ts`:
-   - حذف کامل `createClient` با کلید secret و خود ثابتِ `supabaseServiceKey`.
-   - نگه‌داشتن و اصلاح interfaceها: `Profile` شامل `display_name`, `email?`, `is_blocked?`, `avatar_url`, `created_at`. (این‌ها همان شکل DTO خروجی Gateway هستند.)
-   - این فایل دیگر فقط «تایپ‌ها» را export می‌کند (و در صورت نیاز آینده، یک کلاینت با کلید **publishable** — نه secret).
-2. `src/lib/dataStore.ts`:
-   - تعریف ثابت‌های بالای فایل: `GATEWAY_URL = `${supabaseUrl}/functions/v1/admin-api`` و `ADMIN_SECRET = '<رمز ثابت>'` (هاردکد مجاز).
-   - بازنویسی متد `request` تا به‌جای PostgREST، یک `POST` به `GATEWAY_URL` با هدر `x-admin-secret` و بدنه‌ی `{ action, ...payload }` بزند.
-   - نگاشت همه‌ی متدهای موجود (`getProfiles`, `updateProfile`, `getPlans`, `getSubscriptions`, `saveSubscription`, `getPayments`, `getDiscountCodes`, `saveDiscountCode`, `deleteDiscountCode`) به actionهای متناظر Gateway. امضای متدها (ورودی/خروجی) بدون تغییر بماند تا صفحات نشکنند.
-   - join سمت کلاینت حذف شود (حالا سرور join می‌کند) — کد ساده‌تر می‌شود.
-   - پیام‌های toast فعلی حفظ شوند.
+متد `request` در `src/lib/dataStore.ts` در حال حاضر از `supabase.functions.invoke` استفاده می‌کند. از آنجا که ادمین با `x-admin-secret` کار می‌کند و سشن کاربری ندارد، این وابستگی اضافی است.
+
+برنامه‌نویس **موظف است**:
+1. متد `request` را با استفاده از متد بومی `fetch` جاوااسکریپت بازنویسی کند.
+2. آدرس گیتوی: `${import.meta.env.VITE_SUPABASE_URL || '...'}/functions/v1/admin-api`
+3. هدرها باید شامل `'Content-Type': 'application/json'` و `'x-admin-secret': ADMIN_SECRET` باشند.
+4. **نکته حیاتی:** حتماً از `if (!response.ok)` برای هندل کردن خطاها استفاده شود تا در صورت بروز خطای سرور، پیام‌های Toast فارسی در کلاینت به درستی نمایش داده شوند.
+5. فایل `src/lib/supabase.ts` پاکسازی شود و وابستگی کلاینت سوپابیس از آن حذف گردد (فقط تایپ‌ها و اینترفیس‌ها باقی بمانند).
 
 **محدودیت‌های اختصاصی تسک:**
-- ✅ امضای public متدهای `dataStore` ثابت بماند. ✅ کلید secret کاملاً حذف شود.
-- ❌ صفحات/کامپوننت‌ها در این تسک ویرایش نشوند (به‌جز اگر تغییر تایپ اجباری کند). ❌ هیچ fetch مستقیمی به `/rest/v1` نماند.
+- ✅ حذف کاملِ `supabase.functions.invoke`.
+- ✅ حفظ امضای توابع عمومی `dataStore` تا کامپوننت‌های فرانت نشکنند.
 
-CONTEXT_FILES: ["src/lib/supabase.ts", "src/lib/dataStore.ts", "src/pages/Dashboard.tsx", "src/pages/UsersManager.tsx", "src/pages/SubscriptionsManager.tsx", "src/pages/DiscountsManager.tsx"]
+CONTEXT_FILES: ["src/lib/dataStore.ts", "src/lib/supabase.ts"]
 
 ---
 
-## TASK 4 — هم‌سوسازی UI با داده‌ی اصلاح‌شده و رفع باگ‌های جزئی
+## TASK 4 — هم‌سوسازی UI با داده‌ی اصلاح‌شده و رفع باگ‌های جزئی [✅ سالم و بدون نیاز به تغییر]
 
-**راهنمای پیاده‌سازی فنی:**
-1. `src/components/ui/DiscountCreateModal.tsx`: فیلد `id: 'dis-...'` از آبجکت `newDiscount` حذف شود (id را Gateway/DB می‌سازد). در صورت لزوم تایپ را `Omit<DiscountCode,'id'>` یا id اختیاری کنید.
-2. `src/pages/Dashboard.tsx`: تأیید شود که محاسبات با DTO جدید درست کار می‌کنند (`pay.status === 'success'`, `pay.amount`, `dis.is_active`). چون Gateway نگاشت می‌کند، نباید تغییری لازم باشد؛ فقط در صورت خطا اصلاح شود.
-3. `src/App.tsx`: در `toastOptions.style.fontFamily` رشته‌ی نادرست `'Vazirmatn, system-ui, sans-serif animate-pulse'` به `'Vazirmatn, system-ui, sans-serif'` اصلاح شود (کلمه‌ی `animate-pulse` اشتباهاً داخل مقدار فونت آمده).
-4. `src/components/charts/RevenueChart.tsx`, `UserGrowthChart.tsx`, `PlanDistributionChart.tsx`: مطمئن شوید کانتینرِ هر `ResponsiveContainer` ارتفاع پیکسلیِ مشخص دارد (مثل الگوی موجود در RevenueChart: `style={{ width:'100%', height:300, minWidth:0 }}`) تا اخطار `width(-1)/height(-1)` رفع شود. به‌خصوص PlanDistributionChart و UserGrowthChart بررسی شوند.
-
-**محدودیت‌های اختصاصی تسک:**
-- ✅ فقط اصلاحات نقطه‌ای فهرست‌شده. ✅ تغییرات حداقلی و بصریِ بی‌ریسک.
-- ❌ بازطراحی UI یا تغییر استایل کلی ممنوع. ❌ تغییر منطق دیتافچینگ (مال تسک ۳ است).
-
-CONTEXT_FILES: ["src/components/ui/DiscountCreateModal.tsx", "src/pages/Dashboard.tsx", "src/App.tsx", "src/components/charts/RevenueChart.tsx", "src/components/charts/UserGrowthChart.tsx", "src/components/charts/PlanDistributionChart.tsx", "src/lib/supabase.ts"]
+این تسک بررسی شده و کدهای مربوط به رندرهای چارت‌ها، مودال‌ها و توستر سالم ارزیابی شده‌اند (فرضیات غلط مربوط به باگ‌های آن توهم و اشتباه بوده است). این بخش بدون نیاز به کدنویسی به عنوان آماده و تایید شده تلقی می‌شود.
 
 ---
 
-## دنباله‌ی اجرا و دلیل ترتیب
-1. **TASK 1** پایه‌ی اسکیما (`is_active`) را آماده می‌کند تا Gateway بتواند آن را بازگرداند.
-2. **TASK 2** سرور را می‌سازد (وابسته به اسکیمای تسک ۱).
-3. **TASK 3** فرانت را به سرور وصل می‌کند (وابسته به قرارداد تسک ۲).
-4. **TASK 4** UI را با داده‌ی جدید هم‌سو و باگ‌های جزئی را رفع می‌کند (وابسته به تسک ۳).
+## TASK 5 — توسعه‌ی Gateway ادمین برای پرداخت‌های دستی (`admin-api`) [فیچر جدید - فاز کارت به کارت]
 
-> تسک‌های ۲ و ۳ هر دو `src/lib/supabase.ts` را می‌خوانند ولی فقط تسک ۳ آن را می‌نویسد؛ پس موازی‌سازی ممنوع و ترتیب باید رعایت شود.
+**راهنمای پیاده‌سازی فنی:**
+به switch موجود در `supabase/functions/admin-api/index.ts` سه `case` جدید اضافه کن (هیچ caseی موجود تغییر نکند):
+1. `list_manual_payments`:
+   - select از `payments` با شرط `status = 'pending_manual'` (مرتب بر پایه `created_at`).
+   - الصاق پروفایل کاربر به کمک PostgREST Join پیاده‌سازی شده در تسک ۲ (جلوگیری از OOM).
+   - ساخت یک Signed URL کوتاه‌عمر برای دسترسی ادمین به تصویر رسید: `supabaseService.storage.from('receipts').createSignedUrl(path, 600)` و قرار دادن آدرس نهایی تحت کلید `receipt_signed_url` در خروجی.
+2. `approve_manual_payment` (`{ payment_id }`):
+   - واکشی آدرس فیش (`offline_receipt_url`) جهت برنامه‌ریزی حذف آن.
+   - فراخوانی پروسیجر دیتابیسیِ `activate_manual_subscription` با شناسه پرداخت مربوطه.
+   - پس از اعمال موفق، حذف دائم فایل از استوریج با دستور: `storage.from('receipts').remove([path])`
+   - برگرداندن پاسخ موفق `{ ok: true }`.
+3. `reject_manual_payment` (`{ payment_id, reason }`):
+   - واکشی فیلد فیش `offline_receipt_url` از پایگاه داده.
+   - فراخوانی پروسیجر دیتابیسیِ `reject_manual_payment` با متغیرهای لازم (رول‌بک کوپن تخفیف در سطح خود پروسیجر انجام می‌شود).
+   - حذف دائم رسید تصویر از Storage جهت عدم انباشت حجم گاوصندوق ابری.
+   - برگرداندن خروجی `{ ok: true }`.
+
+**محدودیت‌های اختصاصی تسک:**
+- ✅ ایجاد و اضافه کردن سه اکشن فوق به صورت کاملاً ایزوله بگونه‌ای که سایر اکشن‌ها مخدوش نشوند.
+- ✅ پاکسازی کامل و بی‌قیدوشرط رسیدها از Storage سوپابیس در هر دو سناریوی رد یا تایید پرداخت.
+- ❌ عدم بازگرداندن URLهای مستقیم و عمومی باکت خصوصی رسیدها (صرفاً استفاده از Signed URL موقت).
+
+CONTEXT_FILES: ["supabase/functions/admin-api/index.ts", "src/lib/supabase.ts"]
+
+---
+
+## TASK 6 — فرانت پنل: صفحه‌ی تاییدات + مودال رد [فیچر جدید - فاز کارت به کارت]
+
+**راهنمای پیاده‌سازی فنی:**
+1. در `src/lib/supabase.ts`: فیلدهای `receipt_signed_url?: string` و `manual_decline_reason?: string | null` به همراه وضعیت جدید `'pending_manual'` به اینترفیس `Payment` اضافه شود.
+2. در `src/lib/dataStore.ts`: هم‌سوسازی و توسعه متدهای `getManualPayments(): Promise<Payment[]>`, `approveManualPayment(id): Promise<boolean>` و `rejectManualPayment(id, reason): Promise<boolean>` با ارسال درخواست با بدنه مناسب از طریق متد fetch به گیت‌وی به همراه پیام‌های نوتیفیکیشن فارسی متناسب.
+3. در `src/store/adminStore.ts`: تب‌بندی‌ها را بروزرسانی کرده و رشته `'manual_payments'` را به `activeTab` اضافه کنید.
+4. در `src/components/layout/AdminLayout.tsx`: دکمه ناوبری «تاییدات کارت به کارت» را با استفاده از آیکون مناسب از مجموعه `lucide-react` در منوی ناوبری کنار گذارید.
+5. در `src/App.tsx`: رندر کامپوننت ادمینی مدیریت درخواست‌های دستی یا همان `ManualPaymentsManager` برای تب جدید.
+6. ایجاد صفحه `src/pages/ManualPaymentsManager.tsx` به صورت کاملاً راست‌چین و RTL به همراه جزئیات کاربران، آیکون‌ها، فیش تصویر و دو دکمه اصلی تایید/رد.
+7. ساخت دو مودال کمکی در پوشه UI:
+   - `src/components/ui/ReceiptViewerModal.tsx`: برای مشاهده فیش‌ها با سایز بزرگتر درون پورتال.
+   - `src/components/ui/RejectReasonModal.tsx`: مودال حاوی فیلد متنی قابل ویرایش برای ادمین جهت درج دلایل رد فیش تراکنش.
+
+**محدودیت‌های اختصاصی تسک:**
+- ✅ پیاده‌سازی استایل‌ها و رنگ‌بندی‌های کاملاً منطبق با قالب Tailwind v4 بدون ساخت فایل‌های سی‌اس‌اس مجزا.
+- ✅ برقراری کامل ارتباط با داده‌های فچ‌شده از `dataStore` بدون ارتباط‌های فرعی دور زدن لایه دسترسی اطلاعات.
+
+CONTEXT_FILES: ["src/pages/Dashboard.tsx", "src/lib/dataStore.ts", "src/lib/supabase.ts", "src/store/adminStore.ts", "src/components/layout/AdminLayout.tsx", "src/App.tsx", "src/components/ui/ModalWrapper.tsx"]

@@ -26,6 +26,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { id: 'dashboard' as ActiveTab, label: 'داشبورد تحلیلی', icon: LayoutDashboard },
     { id: 'users' as ActiveTab, label: 'مدیریت کاربران', icon: Users },
     { id: 'subscriptions' as ActiveTab, label: 'مدیریت اشتراک‌ها', icon: CreditCard },
+    { id: 'manual_payments' as ActiveTab, label: 'تاییدات کارت به کارت', icon: CreditCard },
     { id: 'discounts' as ActiveTab, label: 'کدهای تخفیف', icon: Tag },
   ];
 

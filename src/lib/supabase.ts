@@ -1,6 +1,3 @@
-// Any needed supabase client-side library import
-import { createClient } from '@supabase/supabase-js';
-
 // Helper types matching the database schema and Gateway DTO outputs
 export interface Profile {
   id: string;
@@ -33,8 +30,10 @@ export interface Payment {
   id: string;
   user_id: string;
   amount: number;
-  status: 'success' | 'failed' | 'pending';
+  status: 'success' | 'failed' | 'pending' | 'pending_manual';
   coupon_code?: string | null;
+  receipt_signed_url?: string | null;
+  manual_decline_reason?: string | null;
   created_at: string;
   profiles?: Profile;
 }
@@ -50,10 +49,6 @@ export interface DiscountCode {
   created_at: string;
 }
 
-// Client-side publishable initialize
-const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL || 'https://rvgiidesehuaqqncqilu.supabase.co';
-const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 

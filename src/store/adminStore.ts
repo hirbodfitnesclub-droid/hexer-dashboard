@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ActiveTab = 'dashboard' | 'users' | 'subscriptions' | 'discounts';
+export type ActiveTab = 'dashboard' | 'users' | 'subscriptions' | 'discounts' | 'manual_payments';
 
 interface AdminState {
   isAuthenticated: boolean;

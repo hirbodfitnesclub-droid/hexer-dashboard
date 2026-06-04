@@ -142,9 +142,22 @@ Deno.serve(async (req: Request) => {
 
         if (sErr) throw sErr;
 
-        // Fetch companion tables to construct joined DTO objects inside Edge function
-        const { data: profiles } = await supabaseService.from('profiles').select('*');
-        const { data: plans } = await supabaseService.from('plans').select('*');
+        // Batch Querying: extract unique user IDs to avoid loading all profiles and causing OOM
+        const userIds = [...new Set((subs || []).map(sub => sub.user_id).filter(Boolean))];
+        let profiles: any[] = [];
+        if (userIds.length > 0) {
+          const { data: pData, error: pError } = await supabaseService
+            .from('profiles')
+            .select('*')
+            .in('id', userIds);
+          if (pError) throw pError;
+          if (pData) profiles = pData;
+        }
+
+        const { data: plans, error: plErr } = await supabaseService
+          .from('plans')
+          .select('*');
+        if (plErr) throw plErr;
 
         const subDTOs = (subs || []).map(sub => {
           const profile = (profiles || []).find(p => p.id === sub.user_id);
@@ -219,15 +232,31 @@ Deno.serve(async (req: Request) => {
 
         if (pErr) throw pErr;
 
-        // Fetch companion tables defensively
-        const { data: profiles } = await supabaseService.from('profiles').select('*');
-        
+        // Batch Querying: extract unique user IDs to avoid OOM from loading all profiles
+        const userIds = [...new Set((payments || []).map(p => p.user_id).filter(Boolean))];
+        let profiles: any[] = [];
+        if (userIds.length > 0) {
+          const { data: pData, error: profileErr } = await supabaseService
+            .from('profiles')
+            .select('*')
+            .in('id', userIds);
+          if (profileErr) throw profileErr;
+          if (pData) profiles = pData;
+        }
+
+        // Batch Querying: extract unique coupon/discount code IDs to avoid OOM from loading all discount codes
+        const couponIds = [...new Set((payments || []).map(p => p.discount_code_id).filter(Boolean))];
         let coupons: any[] = [];
-        try {
-          const { data, error } = await supabaseService.from('discount_codes').select('*');
-          if (!error && data) coupons = data;
-        } catch (err) {
-          console.warn("Could not retrieve discount_codes defensively, continuing without coupon join:", err);
+        if (couponIds.length > 0) {
+          try {
+            const { data, error } = await supabaseService
+              .from('discount_codes')
+              .select('*')
+              .in('id', couponIds);
+            if (!error && data) coupons = data;
+          } catch (err) {
+            console.warn("Could not retrieve discount_codes defensively:", err);
+          }
         }
 
         const paymentDTOs = (payments || []).map(pay => {
@@ -305,6 +334,174 @@ Deno.serve(async (req: Request) => {
           .from('discount_codes')
           .delete()
           .eq('id', id);
+
+        if (error) throw error;
+
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'list_manual_payments': {
+        // دریافت لیست تراکنش‌ها با وضعیت pending_manual
+        const { data: payments, error: pErr } = await supabaseService
+          .from('payments')
+          .select('*')
+          .eq('status', 'pending_manual')
+          .order('created_at', { ascending: false });
+
+        if (pErr) throw pErr;
+
+        const userIds = [...new Set((payments || []).map(p => p.user_id).filter(Boolean))];
+        let profiles: any[] = [];
+        if (userIds.length > 0) {
+          const { data: pData, error: profileErr } = await supabaseService
+            .from('profiles')
+            .select('*')
+            .in('id', userIds);
+          if (profileErr) throw profileErr;
+          if (pData) profiles = pData;
+        }
+
+        // آماده‌سازی DTOها به همراه تولید لینک کوتاه‌عمر خصوصی رسیدها
+        const paymentDTOs = [];
+        for (const pay of (payments || [])) {
+          const profile = (profiles || []).find(p => p.id === pay.user_id);
+          
+          // پارس کردن مسیر نسبی تصویر از فیلد offline_receipt_url
+          let receiptPath = pay.offline_receipt_url || '';
+          if (receiptPath.includes('/receipts/')) {
+            receiptPath = receiptPath.split('/receipts/')[1];
+          }
+
+          let signedUrl = null;
+          if (receiptPath) {
+            try {
+              const { data, error } = await supabaseService.storage
+                .from('receipts')
+                .createSignedUrl(receiptPath, 600); // لینک موقت ۱۰ دقیقه‌ای
+              if (!error && data) {
+                signedUrl = data.signedUrl;
+              }
+            } catch (err) {
+              console.error("خطا در ایجاد لینک موقت فیش:", err);
+            }
+          }
+
+          paymentDTOs.push({
+            id: pay.id,
+            user_id: pay.user_id,
+            amount: Number(pay.final_amount_irr || pay.amount_irr || 0),
+            status: 'pending_manual',
+            receipt_signed_url: signedUrl,
+            created_at: pay.created_at,
+            profiles: profile ? {
+              id: profile.id,
+              display_name: profile.full_name || '',
+              avatar_url: profile.avatar_url,
+              created_at: profile.created_at
+            } : null
+          });
+        }
+
+        return new Response(JSON.stringify(paymentDTOs), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'approve_manual_payment': {
+        const { payment_id } = body;
+        if (!payment_id) throw new Error("شناسه تراکنش الزامی است");
+
+        // دریافت لینک رسید جهت حذف فیزیکی پس از اتمام
+        const { data: pay, error: fErr } = await supabaseService
+          .from('payments')
+          .select('offline_receipt_url')
+          .eq('id', payment_id)
+          .single();
+        if (fErr) throw fErr;
+
+        // فراخوانی پروسیجر دیتابیسی
+        const { error: rpcErr } = await supabaseService.rpc('activate_manual_subscription', {
+          p_payment_id: payment_id
+        });
+        if (rpcErr) throw rpcErr;
+
+        // حذف بهینه از سطل ذخیره‌سازی receipts
+        let receiptPath = pay?.offline_receipt_url || '';
+        if (receiptPath.includes('/receipts/')) {
+          receiptPath = receiptPath.split('/receipts/')[1];
+        }
+
+        if (receiptPath) {
+          await supabaseService.storage.from('receipts').remove([receiptPath]);
+        }
+
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'reject_manual_payment': {
+        const { payment_id, reason } = body;
+        if (!payment_id || !reason) throw new Error("شناسه تراکنش و دلیل رد فیش الزامی است");
+
+        // دریافت لینک رسید جهت حذف از استوریج
+        const { data: pay, error: fErr } = await supabaseService
+          .from('payments')
+          .select('offline_receipt_url')
+          .eq('id', payment_id)
+          .single();
+        if (fErr) throw fErr;
+
+        // فراخوانی پروسیجر دیتابیسی ابطال تراکنش
+        const { error: rpcErr } = await supabaseService.rpc('reject_manual_payment', {
+          p_payment_id: payment_id,
+          p_reason: reason
+        });
+        if (rpcErr) throw rpcErr;
+
+        // حذف بهینه فیش از استوریج جهت بهینه‌سازی فضا
+        let receiptPath = pay?.offline_receipt_url || '';
+        if (receiptPath.includes('/receipts/')) {
+          receiptPath = receiptPath.split('/receipts/')[1];
+        }
+
+        if (receiptPath) {
+          await supabaseService.storage.from('receipts').remove([receiptPath]);
+        }
+
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'get_telegram_settings': {
+        const { data, error } = await supabaseService
+          .from('telegram_settings')
+          .select('*')
+          .eq('id', 1)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        return new Response(JSON.stringify(data || { id: 1, bot_token: '', chat_id: '', is_enabled: false }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'save_telegram_settings': {
+        const { bot_token, chat_id, is_enabled } = body;
+        
+        const { error } = await supabaseService
+          .from('telegram_settings')
+          .upsert({
+            id: 1,
+            bot_token,
+            chat_id,
+            is_enabled,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' });
 
         if (error) throw error;
 
