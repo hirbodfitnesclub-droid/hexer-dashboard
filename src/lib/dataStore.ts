@@ -1,4 +1,4 @@
-import { Profile, Subscription, Payment, DiscountCode, Plan } from './supabase';
+import { Profile, Subscription, Payment, DiscountCode, Plan, SupportTicket } from './supabase';
 import toast from 'react-hot-toast';
 
 const ADMIN_SECRET = '3128';
@@ -198,6 +198,17 @@ class DataService {
       return true;
     } catch (error: any) {
       console.error('Error saving telegram settings:', error);
+      throw error;
+    }
+  }
+
+  // Fetch support tickets
+  async getTickets(): Promise<SupportTicket[]> {
+    try {
+      const data = await this.request('list_tickets');
+      return (data || []) as SupportTicket[];
+    } catch (error) {
+      console.error('Error fetching support tickets:', error);
       throw error;
     }
   }

@@ -510,6 +510,54 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      case 'list_tickets': {
+        const { data: tickets, error: tErr } = await supabaseService
+          .from('support_tickets')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (tErr) throw tErr;
+
+        const userIds = [...new Set((tickets || []).map(t => t.user_id).filter(Boolean))];
+        let profiles: any[] = [];
+        if (userIds.length > 0) {
+          const { data: pData, error: profileErr } = await supabaseService
+            .from('profiles')
+            .select('*')
+            .in('id', userIds);
+          if (profileErr) throw profileErr;
+          if (pData) profiles = pData;
+        }
+
+        const { data: { users }, error: uErr } = await supabaseService.auth.admin.listUsers();
+        const usersList = users || [];
+
+        const ticketDTOs = (tickets || []).map(ticket => {
+          const profile = (profiles || []).find(p => p.id === ticket.user_id);
+          const authUser = usersList.find(u => u.id === ticket.user_id);
+
+          return {
+            id: ticket.id,
+            user_id: ticket.user_id,
+            subject: ticket.subject,
+            message: ticket.message,
+            status: ticket.status,
+            created_at: ticket.created_at,
+            profiles: profile ? {
+              id: profile.id,
+              display_name: profile.full_name || '',
+              avatar_url: profile.avatar_url,
+              created_at: profile.created_at
+            } : null,
+            email: authUser?.email || ''
+          };
+        });
+
+        return new Response(JSON.stringify(ticketDTOs), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: `عملیات ${action} پشتیبانی نمی‌شود` }), {
           status: 400,

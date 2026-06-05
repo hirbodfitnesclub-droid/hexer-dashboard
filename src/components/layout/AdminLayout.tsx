@@ -10,7 +10,8 @@ import {
   X, 
   ShieldAlert,
   User,
-  Bell
+  Bell,
+  MessageSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -28,6 +29,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { id: 'subscriptions' as ActiveTab, label: 'مدیریت اشتراک‌ها', icon: CreditCard },
     { id: 'manual_payments' as ActiveTab, label: 'تاییدات کارت به کارت', icon: CreditCard },
     { id: 'discounts' as ActiveTab, label: 'کدهای تخفیف', icon: Tag },
+    { id: 'tickets' as ActiveTab, label: 'تیکت‌های پشتیبانی', icon: MessageSquare },
   ];
 
   const handleTabClick = (tabId: ActiveTab) => {

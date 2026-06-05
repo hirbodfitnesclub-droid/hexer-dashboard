@@ -49,6 +49,18 @@ export interface DiscountCode {
   created_at: string;
 }
 
-
-
-
+export interface SupportTicket {
+  id: string;
+  user_id: string;
+  subject: string;
+  message: string;
+  status: 'open' | 'pending' | 'resolved' | 'closed' | string;
+  created_at: string;
+  profiles: {
+    id: string;
+    display_name: string;
+    avatar_url: string | null;
+    created_at: string;
+  } | null;
+  email: string;
+}
