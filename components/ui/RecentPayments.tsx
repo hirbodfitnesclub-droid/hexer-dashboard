@@ -46,7 +46,7 @@ export const RecentPayments: React.FC<RecentPaymentsProps> = ({
                   </div>
                 </td>
                 <td className="py-3.5 text-xs font-bold text-slate-100 font-mono">
-                  {payment.amount.toLocaleString('fa-IR')}
+                  {(payment.amount / 10).toLocaleString('fa-IR')}
                 </td>
                 <td className="py-3.5">
                   {payment.coupon_code ? (

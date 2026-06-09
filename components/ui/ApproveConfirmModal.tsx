@@ -39,7 +39,7 @@ export const ApproveConfirmModal: React.FC<ApproveConfirmModalProps> = ({
             <div className="mt-3 inline-block bg-slate-950/50 border border-white/5 px-4 py-2 rounded-xl">
               <span className="text-xs text-slate-500 block mb-0.5">مبلغ تراکنش:</span>
               <span className="font-mono text-sm font-bold text-emerald-400">
-                {amount.toLocaleString('fa-IR')} <span className="text-[10px] font-sans">ریال</span>
+                {(amount / 10).toLocaleString('fa-IR')} <span className="text-[10px] font-sans">تومان</span>
               </span>
             </div>
           )}

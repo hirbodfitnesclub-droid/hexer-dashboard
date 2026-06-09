@@ -62,7 +62,7 @@ export const SubscriptionRow: React.FC<SubscriptionRowProps> = ({
         {getStatusBadge(subscription.status)}
       </td>
       <td className="py-4 text-right text-xs text-slate-400 font-mono font-bold">
-        {subscription.plans?.price ? `${subscription.plans.price.toLocaleString('fa-IR')} تومان` : '۰ تومان'}
+        {subscription.plans?.price ? `${(subscription.plans.price / 10).toLocaleString('fa-IR')} تومان` : '۰ تومان'}
       </td>
       <td className="py-4 text-right text-xs font-semibold text-slate-400">
         {subscription.expires_at ? (
