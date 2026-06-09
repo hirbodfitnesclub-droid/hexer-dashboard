@@ -42,7 +42,7 @@ export const ReceiptViewerModal: React.FC<ReceiptViewerModalProps> = ({
         <div id="receipt-amount-display" className="w-full flex justify-between items-center bg-slate-950/40 p-4 rounded-xl border border-white/5">
           <span id="amount-label" className="text-sm text-slate-400 font-semibold">مبلغ تراکنش:</span>
           <span id="amount-value" className="text-base font-bold text-emerald-400">
-            {amount.toLocaleString('fa-IR')} ریال
+            {(amount / 10).toLocaleString('fa-IR')} تومان
           </span>
         </div>
       </div>

@@ -53,7 +53,7 @@ export const TicketsManager: React.FC = () => {
     if (!email) return;
     navigator.clipboard.writeText(email);
     setCopiedEmail(true);
-    toast.success('ایمیل کاربر کپی شد');
+    toast.success('شناسه تماس کاربر کپی شد');
     setTimeout(() => setCopiedEmail(false), 2000);
   };
 
@@ -266,7 +266,7 @@ export const TicketsManager: React.FC = () => {
           <Input
             id="ticket-search-box"
             type="text"
-            placeholder="جستجو در موضوع، پیغام یا ایمیل..."
+            placeholder="جستجو در موضوع، پیغام، ایمیل یا موبایل..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pr-10 font-sans text-xs bg-slate-950/50 border-white/5 focus:border-brand-500/50 rounded-xl"
@@ -344,7 +344,7 @@ export const TicketsManager: React.FC = () => {
 
                     <div className="flex items-center space-x-1.5 space-x-reverse">
                       <span className="text-[10px] text-slate-500 truncate max-w-[140px] font-mono leading-none">
-                        {ticket.email || 'بدون ایمیل'}
+                        {ticket.email || 'بدون ایمیل / موبایل'}
                       </span>
                       <button 
                         id={`btn-view-${ticket.id}`}
@@ -426,7 +426,7 @@ export const TicketsManager: React.FC = () => {
 
                 <div className="flex items-center justify-between sm:justify-end gap-3 pt-3 sm:pt-0 border-t sm:border-t-0 border-white/5">
                   <div className="text-left font-mono text-xs text-slate-400 leading-none">
-                    {selectedTicket.email || 'بدون پست الکترونیک'}
+                    {selectedTicket.email || 'بدون ایمیل / موبایل'}
                   </div>
 
                   <Button
@@ -437,7 +437,7 @@ export const TicketsManager: React.FC = () => {
                     icon={copiedEmail ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
                     className="!py-1 font-sans text-[10px] min-h-0 bg-slate-800/80"
                   >
-                    {copiedEmail ? 'کپی شد' : 'کپی ایمیل'}
+                    {copiedEmail ? 'کپی شد' : 'کپی شناسه تماس'}
                   </Button>
                 </div>
               </div>
@@ -448,7 +448,7 @@ export const TicketsManager: React.FC = () => {
               <Mail className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
               <p className="text-[11px] leading-relaxed">
                 برای فرستادن پاسخ، لطفاً با کلیک روی دکمه{' '}
-                <strong className="text-slate-300">کپی ایمیل</strong>، آدرس ایمیل کاربر را بردارید و پاسخ تیکت او را از وب‌میل پشتیبانی رسمی هکسر برایش ارسال کنید.
+                <strong className="text-slate-300">کپی شناسه تماس</strong>، شناسه تماس (ایمیل/موبایل) کاربر را کپی کرده و از طریق وب‌میل یا تماس پیگیری کنید.
               </p>
             </div>
           </div>

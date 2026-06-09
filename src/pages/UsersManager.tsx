@@ -121,7 +121,7 @@ export const UsersManager: React.FC = () => {
           <Input
             id="user-search-query"
             type="text"
-            placeholder="جستجو بر اساس نام، ایمیل، شناسه کاربری..."
+            placeholder="جستجو بر اساس نام، ایمیل/شماره همراه، شناسه..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             icon={<Search className="w-4 h-4 text-slate-500" />}

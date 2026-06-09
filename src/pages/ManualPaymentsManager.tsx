@@ -307,7 +307,7 @@ export const ManualPaymentsManager: React.FC = () => {
                       {/* Payment Amount */}
                       <td className="px-6 py-4">
                         <span className="font-mono text-sm font-bold text-white bg-slate-950/50 px-2.5 py-1 rounded-lg border border-white/5">
-                          {pay.amount.toLocaleString('fa-IR')} <span className="text-[10px] text-slate-400 font-sans">ریال</span>
+                          {(pay.amount / 10).toLocaleString('fa-IR')} <span className="text-[10px] text-slate-400 font-sans">تومان</span>
                         </span>
                       </td>
 

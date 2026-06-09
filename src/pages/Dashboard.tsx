@@ -85,7 +85,7 @@ export const Dashboard: React.FC = () => {
   });
 
   const revenueChartData = revenueDateMap.size > 0 
-    ? Array.from(revenueDateMap.entries()).map(([date, amount]) => ({ date, amount }))
+    ? Array.from(revenueDateMap.entries()).map(([date, amount]) => ({ date, amount: amount / 10 }))
     : [{ date: 'امروز', amount: 0 }];
 
   // Cumulative User Growth grouped by signup date
@@ -251,7 +251,7 @@ export const Dashboard: React.FC = () => {
         <StatsCard
           id="stat-revenue"
           title="کل درآمد کسب شده"
-          value={`${totalRevenue.toLocaleString('fa-IR')} تومان`}
+          value={`${(totalRevenue / 10).toLocaleString('fa-IR')} تومان`}
           icon={CircleDollarSign}
           trend={revenueTrend}
           iconColorClass="text-emerald-400 bg-emerald-500/10"

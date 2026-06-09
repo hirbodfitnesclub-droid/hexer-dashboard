@@ -113,7 +113,7 @@ export const SubscriptionsManager: React.FC = () => {
           <Input
             id="sub-search-query-inp"
             type="text"
-            placeholder="جستجو بر اساس نام کاربر، ایمیل یا شناسه اشتراک..."
+            placeholder="جستجو بر اساس نام کاربر، ایمیل/موبایل یا شناسه..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             icon={<Search className="w-4 h-4 text-slate-500" />}

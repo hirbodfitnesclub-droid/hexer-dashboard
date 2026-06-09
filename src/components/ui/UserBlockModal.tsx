@@ -49,7 +49,7 @@ export const UserBlockModal: React.FC<UserBlockModalProps> = ({
       <form id="edit-user-form" onSubmit={handleSubmit} className="space-y-6">
         <div id="quick-meta-user" className="p-3 bg-slate-950/40 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-1">
           <p id="usr-uid">شناسه سیستمی: <span className="font-mono text-slate-300">#{profile?.id}</span></p>
-          <p id="usr-uemail">پست الکترونیکی: <span className="font-mono text-slate-300">{profile?.email || 'مشخص نشده'}</span></p>
+          <p id="usr-uemail">ایمیل / شماره همراه: <span className="font-mono text-slate-300">{profile?.email || 'مشخص نشده'}</span></p>
         </div>
 
         <Input

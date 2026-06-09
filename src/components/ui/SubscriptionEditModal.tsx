@@ -74,7 +74,7 @@ export const SubscriptionEditModal: React.FC<SubscriptionEditModalProps> = ({
         {/* User identification meta info */}
         <div id="sub-meta-display" className="p-3 bg-slate-950/40 rounded-xl border border-slate-805 text-xs text-slate-400 space-y-1">
           <p id="sub-user-title">نام کاربر: <span className="font-bold text-slate-200">{subscription?.profiles?.display_name || 'کاربر بدون نام'}</span></p>
-          <p id="sub-user-email">ایمیل ثبت‌نامی: <span className="font-mono text-slate-300">{subscription?.profiles?.email || 'بدون ایمیل'}</span></p>
+          <p id="sub-user-email">ایمیل / شماره تماس: <span className="font-mono text-slate-300">{subscription?.profiles?.email || 'بدون ایمیل / موبایل'}</span></p>
         </div>
 
         {/* Plan Type Grid Options */}
