@@ -104,3 +104,86 @@ CONTEXT_FILES: ["supabase/functions/admin-api/index.ts", "src/lib/supabase.ts"]
 - ✅ برقراری کامل ارتباط با داده‌های فچ‌شده از `dataStore` بدون ارتباط‌های فرعی دور زدن لایه دسترسی اطلاعات.
 
 CONTEXT_FILES: ["src/pages/Dashboard.tsx", "src/lib/dataStore.ts", "src/lib/supabase.ts", "src/store/adminStore.ts", "src/components/layout/AdminLayout.tsx", "src/App.tsx", "src/components/ui/ModalWrapper.tsx"]
+
+---
+
+# فاز مارکتینگ و اتریبیوشن (تسک‌های ۷ تا ۱۵)
+
+> ترتیب اجباری است؛ هر تسک به خروجی تسک قبل وابسته است. تسک‌های SQL (۷–۱۰) و تسک‌های فرانت (۱۲–۱۵) روی فایل‌های مشترک می‌نویسند، پس **هرگز موازی اجرا نشوند**. برای کدنویس: هر تسک را کامل و بسته تحویل بده، خارج از محدوده‌ی تسک چیزی دست نزن.
+
+## TASK 7 — اسکیمای دیتابیس تحلیلی: events + campaigns + RLS [فاز مارکتینگ]
+**راهنمای پیاده‌سازی:**
+1. دایرکتوری جدید `landing_supabase/analytics_db/sql/` بساز. این فایل‌ها روی **پروژه‌ی Supabase تحلیلی** اجرا می‌شوند (نه اصلی).
+2. `00_extensions.sql`: `CREATE EXTENSION IF NOT EXISTS pgcrypto;`
+3. `01_events.sql`: جدول `public.events` دقیقاً با ستون‌های جدول بخش ۷.۱ ARCHITECTURE (کلید `BIGINT IDENTITY`, `anonymous_id UUID`, `event_type`, پنج فیلد UTM, `landing_host`, `page_path`, `referrer`, `created_at`) + چهار ایندکس.
+4. `02_campaigns.sql`: جدول `public.campaigns` با `utm_campaign` به‌عنوان PK و فیلدهای هزینه/تاریخ/کانال.
+5. `03_rls.sql`: فعال‌سازی RLS؛ روی `events` فقط policy از نوع `INSERT` برای نقش `anon`؛ بدون policy برای SELECT. روی `campaigns` بدون policy عمومی.
+**محدودیت‌های تسک:** همه idempotent (`IF NOT EXISTS` / `DROP POLICY IF EXISTS`). هیچ فایلی زیر `supabase/` ساخته/ویرایش نشود. بدون داده‌ی seed واقعی.
+CONTEXT_FILES: ["docs/ARCHITECTURE.md", "supabase/sql/01_profiles.sql", "supabase/sql/12_rls.sql"]
+
+## TASK 8 — بریج FDW + Vault + foreign tables روی دیتابیس اصلی [فاز مارکتینگ]
+**راهنمای پیاده‌سازی:**
+1. فایل `landing_supabase/admin_db_bridge/sql/00_fdw_setup.sql` (اجرا روی **Supabase اصلی**).
+2. `CREATE EXTENSION IF NOT EXISTS postgres_fdw;` و `CREATE SCHEMA IF NOT EXISTS marketing;`
+3. اعتبارنامه‌ی اتصال به دیتابیس تحلیلی را از **Vault** بخوان (`vault.decrypted_secrets`)، سپس `CREATE SERVER analytics_srv` و `CREATE USER MAPPING`.
+4. `IMPORT FOREIGN SCHEMA` یا `CREATE FOREIGN TABLE` برای `marketing.events_fdw` و `marketing.campaigns_fdw` (فقط ستون‌های لازم).
+5. `REVOKE ALL ... FROM anon, authenticated;` و `GRANT SELECT ... TO service_role;` روی foreign tableها. `campaigns_fdw` باید قابل‌نوشتن بماند (برای UPSERT کمپین).
+**محدودیت‌های تسک:** هیچ اعتبارنامه‌ای هاردکد نشود. فقط اسکیمای `marketing` ساخته شود (هیچ شیء اپ لمس نشود). idempotent.
+CONTEXT_FILES: ["docs/ARCHITECTURE.md", "landing_supabase/analytics_db/sql/01_events.sql", "landing_supabase/analytics_db/sql/02_campaigns.sql"]
+
+## TASK 9 — شش Materialized View گزارش [فاز مارکتینگ]
+**راهنمای پیاده‌سازی:**
+1. فایل `landing_supabase/admin_db_bridge/sql/01_report_views.sql` (روی **Supabase اصلی**، اسکیمای `marketing`).
+2. کلید اتریبیوشن: first-touch روی `profiles.anonymous_id = events_fdw.anonymous_id`.
+3. شش ویو دقیقاً مطابق بخش ۷.۳: `mv_traffic_overview`, `mv_funnel_by_channel`, `mv_purchase_timing`, `mv_retention_by_channel`, `mv_channel_roi`, `mv_campaign_detail`.
+4. درآمد از `payments.amount_irr` با `status='paid'`؛ هزینه از `campaigns_fdw.cost_irr`. روی هر MV یک `UNIQUE INDEX` بساز (لازمه‌ی `REFRESH CONCURRENTLY`).
+**محدودیت‌های تسک:** فقط `CREATE MATERIALIZED VIEW IF NOT EXISTS`؛ جداول اپ فقط خوانده شوند. منطق CAC/ROI را داخل ویو نگه دار تا فرانت محاسبه نکند.
+CONTEXT_FILES: ["docs/ARCHITECTURE.md", "supabase/sql/02_billing.sql", "supabase/sql/04_payments.sql", "supabase/sql/01_profiles.sql", "landing_supabase/admin_db_bridge/sql/00_fdw_setup.sql"]
+
+## TASK 10 — تابع رفرش + زمان‌بندی pg_cron [فاز مارکتینگ]
+**راهنمای پیاده‌سازی:**
+1. فایل `landing_supabase/admin_db_bridge/sql/02_summary_refresh.sql` (روی **Supabase اصلی**).
+2. تابع `marketing.refresh_all()` که هر شش MV را `REFRESH MATERIALIZED VIEW CONCURRENTLY` می‌کند.
+3. `CREATE EXTENSION IF NOT EXISTS pg_cron;` و `cron.schedule('mkt_refresh','*/30 * * * *', $$ SELECT marketing.refresh_all(); $$);` (idempotent: ابتدا `cron.unschedule` در صورت وجود).
+4. فایل `landing_supabase/README.md` بساز و دقیقاً مشخص کن کدام فایل روی کدام پروژه (تحلیلی/اصلی) و با چه ترتیبی اجرا شود.
+**محدودیت‌های تسک:** بدون تغییر در ویوها؛ فقط رفرش و زمان‌بندی.
+CONTEXT_FILES: ["docs/ARCHITECTURE.md", "landing_supabase/admin_db_bridge/sql/01_report_views.sql"]
+
+## TASK 11 — توسعه‌ی Gateway ادمین با اکشن‌های مارکتینگ [فاز مارکتینگ]
+**راهنمای پیاده‌سازی:**
+1. در `supabase/functions/admin-api/index.ts` هشت `case` جدول ۷.۵ را اضافه کن: `marketing_traffic`, `marketing_funnel`, `marketing_purchase_timing`, `marketing_retention`, `marketing_roi`, `marketing_campaigns`, `marketing_campaign_detail`, `marketing_save_campaign`.
+2. همه با همان `supabaseService` موجود (service_role، دیتابیس اصلی) از اسکیمای `marketing` `select` می‌کنند (`.schema('marketing').from('mv_...')`). فقط `marketing_save_campaign` روی `campaigns_fdw` `upsert` می‌کند.
+3. خروجی هر اکشن دقیقاً مطابق DTO تعریف‌شده در تسک ۱۲ شکل داده شود.
+**محدودیت‌های تسک:** هیچ کلاینت Supabase دومی ساخته نشود. caseهای موجود (کاربر/اشتراک/پرداخت) لمس نشوند. الگوی پاسخ/CORS/خطا مثل caseهای فعلی.
+CONTEXT_FILES: ["supabase/functions/admin-api/index.ts", "docs/ARCHITECTURE.md"]
+
+## TASK 12 — لایه‌ی داده‌ی فرانت: DTOها + متدهای dataStore [فاز مارکتینگ]
+**راهنمای پیاده‌سازی:**
+1. در `src/lib/supabase.ts` اینترفیس‌های DTO مارکتینگ را اضافه کن: `TrafficOverview`, `FunnelStage`, `PurchaseTimingRow`, `RetentionRow`, `ChannelRoiRow`, `CampaignSummary`, `CampaignDetail`.
+2. در `src/lib/dataStore.ts` متدها را اضافه کن: `getMarketingTraffic`, `getMarketingFunnel`, `getMarketingPurchaseTiming`, `getMarketingRetention`, `getMarketingRoi`, `getMarketingCampaigns`, `getMarketingCampaignDetail`, `saveMarketingCampaign` — همگی با همان `this.request(action, payload)` موجود و الگوی toast خطا.
+**محدودیت‌های تسک:** فقط افزودن؛ متدها/تایپ‌های موجود تغییر نکنند. هیچ fetch مستقیم خارج از `request`.
+CONTEXT_FILES: ["src/lib/supabase.ts", "src/lib/dataStore.ts"]
+
+## TASK 13 — کامپوننت‌های چارت/جدول مارکتینگ [فاز مارکتینگ]
+**راهنمای پیاده‌سازی:**
+1. `src/components/charts/FunnelChart.tsx` (قیف تبدیل با Recharts؛ سبک تیره/`brand-*`، تولتیپ fa-IR مثل `RevenueChart`).
+2. `src/components/charts/RetentionMatrix.tsx` (ماتریس/هیت‌مپ ماندگاری ماه ۱/۲/۳/۶).
+3. `src/components/marketing/ChannelRoiTable.tsx` (جدول ROI کانال‌ها با فرمت `toLocaleString('fa-IR')`).
+4. `src/components/marketing/CampaignEditorModal.tsx` (ویرایش هزینه/تاریخ/کانال؛ بر پایه‌ی `ModalWrapper` موجود).
+**محدودیت‌های تسک:** فقط Recharts و کلاس‌های Tailwind/`glass-card` موجود؛ بدون CSS جدید. props داده را از بیرون بگیر (fetch نکن).
+CONTEXT_FILES: ["src/components/charts/RevenueChart.tsx", "src/components/charts/PlanDistributionChart.tsx", "src/components/ui/Card.tsx", "src/components/ui/ModalWrapper.tsx", "src/lib/supabase.ts"]
+
+## TASK 14 — صفحه‌ی داشبورد مارکتینگ [فاز مارکتینگ]
+**راهنمای پیاده‌سازی:**
+1. `src/pages/MarketingDashboard.tsx` با همان الگوی `Dashboard.tsx` (useState + useEffect + `Promise.all` روی متدهای `dataStore.getMarketing*`، `LoadingSpinner`، `StatsCard`).
+2. شش بخش گزارش را بچین: کارت‌های ترافیک (۶.۱)، `FunnelChart` (۶.۲)، توزیع زمان خرید (۶.۳)، `RetentionMatrix` (۶.۴)، `ChannelRoiTable` (۶.۵)، و بخش تحلیل تک‌کمپینی (۶.۶) با انتخاب‌گر کمپین + دکمه‌ی ویرایش که `CampaignEditorModal` را باز می‌کند.
+**محدودیت‌های تسک:** فقط از `dataStore` بخوان؛ محاسبات سنگین در ویوها انجام شده. layout ریسپانسیو با گرید Tailwind.
+CONTEXT_FILES: ["src/pages/Dashboard.tsx", "src/lib/dataStore.ts", "src/lib/supabase.ts", "src/components/charts/FunnelChart.tsx", "src/components/charts/RetentionMatrix.tsx", "src/components/marketing/ChannelRoiTable.tsx", "src/components/marketing/CampaignEditorModal.tsx", "src/components/ui/StatsCard.tsx"]
+
+## TASK 15 — اتصال ناوبری تب مارکتینگ [فاز مارکتینگ]
+**راهنمای پیاده‌سازی:**
+1. در `src/store/adminStore.ts` مقدار `'marketing'` را به نوع `ActiveTab` اضافه کن.
+2. در `src/components/layout/AdminLayout.tsx` یک آیتم به آرایه‌ی `menuItems` اضافه کن: `{ id: 'marketing', label: 'تحلیل مارکتینگ', icon: TrendingUp }` (آیکن از lucide). همین آرایه هم دسکتاپ و هم موبایل را تغذیه می‌کند.
+3. در `src/App.tsx` رندر شرطی `{activeTab === 'marketing' && <MarketingDashboard />}` و importش را اضافه کن.
+**محدودیت‌های تسک:** بدون روتر؛ فقط `activeTab`. caseها/آیتم‌های موجود لمس نشوند.
+CONTEXT_FILES: ["src/store/adminStore.ts", "src/components/layout/AdminLayout.tsx", "src/App.tsx", "src/pages/MarketingDashboard.tsx"]

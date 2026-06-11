@@ -168,3 +168,125 @@ Postgres (همه‌ی ردیف‌ها، بدون محدودیت RLS)
 | `approve_manual_payment` | `{ payment_id, user_id }` | `{ ok: true }` | ۱. فراخوانی پروسجر `activate_subscription` دیتابیس (تغییر اشتراک به فعال و پرداخت به `'paid'`). ۲. حذف دائم رسید تصویر از Storage. |
 | `reject_manual_payment` | `{ payment_id, user_id, reason }` | `{ ok: true }` | ۱. تغییر وضعیت پرداخت به `'failed'`. ۲. ثبت پاسخ در ستون `manual_decline_reason`. ۳. آزادسازی کوپن تخفیف رزروی (در صورت وجود). ۴. حذف دائم رسید تصویر از Storage. |
 
+
+---
+
+## ۷. معماری ماژول مارکتینگ و اتریبیوشن (Marketing Analytics Architecture)
+
+### ۷.۰. تصمیم معماری کلیدی (محل سکونت FDW و Viewها) — لنگرگاه
+- دو دیتابیس مجزا: **«تحلیلی»** (events، campaigns) و **«اصلی/اپ»** (profiles، subscriptions، payments، plans).
+- طبق گزارش، **پنل ادمین جداول تحلیلی را با FDW می‌خواند و با داده‌ی کاربر/خرید JOIN می‌زند**؛ و طبق محدودیت کارفرما **ارتباط دو دیتابیس فقط FDW است**. نتیجه‌ی منطقی: اکستنشن `postgres_fdw`، foreign tableها و **همه‌ی Materialized View‌های گزارش روی دیتابیس اصلی** مستقر می‌شوند (همان کانکشنی که `admin-api` از قبل دارد). داشبورد هیچ کانکشن دومی به دیتابیس تحلیلی باز نمی‌کند.
+- **تطبیق با محدودیت دایرکتوری:** با وجود اینکه «بریجِ FDW + Viewها» روی دیتابیس اصلی اجرا می‌شوند، **فایل‌های SQL آن‌ها فیزیکاً زیر `landing_supabase/admin_db_bridge/` قرار می‌گیرند** تا پوشه‌ی `supabase/` کاملاً دست‌نخورده بماند و تمام SQL مرتبط با تحلیل در یک‌جا (`landing_supabase/`) متمرکز باشد. این یک انتخاب آگاهانه‌ی معمار است.
+- **اصل data-gravity:** جمع‌سازی سنگین روی دیتابیسی که داده‌ی پرحجم (`events`) دارد منطقی‌تر بود، اما چون «خواندن از سمت پنل ادمین» و «فقط FDW» دو الزام صریح‌اند، Viewها روی اصلی می‌مانند و فقط ستون‌های لازم رویداد از طریق foreign table کشیده می‌شوند. برای جلوگیری از افت، خروجی به‌صورت Materialized + ایندکس‌گذاری‌شده نگه‌داری می‌شود.
+
+### ۷.۱. اسکیمای دیتابیس تحلیلی (روی پروژه‌ی Supabase «تحلیلی»)
+> فایل‌ها: `landing_supabase/analytics_db/sql/*`
+
+**`public.events`** (پرحجم‌ترین جدول؛ هر بازدید/کلیک یک رکورد)
+| فیلد | نوع | توضیح |
+|---|---|---|
+| `id` | `BIGINT GENERATED ALWAYS AS IDENTITY PK` | کلید سبک برای حجم بالا |
+| `anonymous_id` | `UUID NOT NULL` | قلب اتریبیوشن؛ از کوکیِ سطح‌دامنه |
+| `event_type` | `TEXT NOT NULL` | `page_view` \| `cta_click_start_free` \| `cta_click_login` |
+| `utm_source` | `TEXT` | مثلاً youtube، instagram؛ NULL = مستقیم |
+| `utm_medium` | `TEXT` | |
+| `utm_campaign` | `TEXT` | کلید اتصال به `campaigns` |
+| `utm_content` | `TEXT` | |
+| `utm_term` | `TEXT` | |
+| `landing_host` | `TEXT` | مثل `dev.hexerapp.ir` (تفکیک لندینگ) |
+| `page_path` | `TEXT` | |
+| `referrer` | `TEXT` | |
+| `created_at` | `TIMESTAMPTZ DEFAULT now()` | |
+
+ایندکس‌ها: `(anonymous_id)`، `(utm_campaign)`، `(created_at)`، `(event_type)`.
+
+**`public.campaigns`** (دفترچه‌ی کمپین‌ها — مرجع گزارش ۶.۰)
+| فیلد | نوع | توضیح |
+|---|---|---|
+| `utm_campaign` | `TEXT PRIMARY KEY` | کلید یکتا، اتصال به events |
+| `channel` | `TEXT NOT NULL` | یوتوب/اینستاگرام/... (تحلیل دسته‌جمعی) |
+| `source_name` | `TEXT` | نام دقیق منبع (تحلیل تک‌کمپینی) |
+| `start_date` | `DATE` | |
+| `end_date` | `DATE` | |
+| `cost_irr` | `BIGINT DEFAULT 0` | هزینه به ریال (مبنای CAC/ROI) |
+| `currency` | `TEXT DEFAULT 'IRR'` | |
+| `notes` | `TEXT` | |
+| `created_at` | `TIMESTAMPTZ DEFAULT now()` | |
+
+**RLS دیتابیس تحلیلی:** روی هر دو جدول RLS فعال. روی `events` فقط `INSERT` برای نقش `anon` (لندینگ‌ها رویداد می‌فرستند)؛ **هیچ SELECT عمومی**. روی `campaigns` نه INSERT/SELECT عمومی — مدیریت کمپین فقط از سمت پنل (از طریق FDW با نقش بریج) انجام می‌شود.
+
+### ۷.۲. لایه‌ی بریج FDW (روی پروژه‌ی Supabase «اصلی»)
+> فایل: `landing_supabase/admin_db_bridge/sql/00_fdw_setup.sql` (idempotent)
+- `CREATE EXTENSION IF NOT EXISTS postgres_fdw;`
+- اعتبارنامه‌ی اتصال به دیتابیس تحلیلی در **Supabase Vault** (`vault.create_secret(...)`)؛ هرگز هاردکد نشود.
+- `CREATE SERVER analytics_srv ...` + `CREATE USER MAPPING ...` با خواندن secret از Vault.
+- ساخت اسکیمای اختصاصی `marketing` روی دیتابیس اصلی (جداسازی کامل از اشیای اپ).
+- foreign tableها فقط برای ستون‌های لازم: `marketing.events_fdw`, `marketing.campaigns_fdw`.
+- **گرنت:** دسترسی SELECT روی foreign tableها فقط به `service_role` (نه `anon`/`authenticated`).
+- `campaigns_fdw` به‌صورت **قابل‌نوشتن** تعریف می‌شود تا اکشن `marketing_save_campaign` بتواند با همان FDW در دفترچه‌ی کمپین بنویسد.
+
+### ۷.۳. شش گروه گزارش به‌صورت Materialized View (روی دیتابیس اصلی، اسکیمای `marketing`)
+> فایل: `landing_supabase/admin_db_bridge/sql/01_report_views.sql`
+- **کلید اتریبیوشن:** `profiles.anonymous_id` ⨝ `events_fdw.anonymous_id`. مدل **first-touch**: برای هر `anonymous_id` قدیمی‌ترین رویدادِ دارای UTM به‌عنوان منبع انتساب داده می‌شود.
+- نگاشت گزارش‌ها (مطابق بخش ۶ گزارش مرجع):
+  1. `mv_traffic_overview` (۶.۱): بازدیدکننده‌ی یکتا در بازه‌های امروز/۷روز/۳۰روز × منبع (هر UTM + «مستقیم») × `landing_host`؛ به‌علاوه شمار کلیک «ورود» در برابر «شروع رایگان».
+  2. `mv_funnel_by_channel` (۶.۲): شمارش و درصدِ visit → cta_click → register → free_start → purchase به تفکیک کانال.
+  3. `mv_purchase_timing` (۶.۳): توزیع زمان خرید (لحظه‌ی ثبت‌نام / حین دوره‌ی رایگان / بعد از رایگان / اصلاً نخرید) به تفکیک کانال.
+  4. `mv_retention_by_channel` (۶.۴): ماندگاری کوهورتی ماه ۱/۲/۳/۶ به تفکیک کانال (از وضعیت/تمدید `subscriptions`+`payments`).
+  5. `mv_channel_roi` (۶.۵): کانال | بازدید | ثبت‌نام | خرید | نرخ تبدیل | هزینه‌ی کل | CAC | درآمد | ROI.
+  6. `mv_campaign_detail` (۶.۶): همان متریک‌ها گروه‌بندی‌شده بر `utm_campaign` (تحلیل عمیق تک‌کمپینی + مقایسه با میانگین کانال).
+- درآمد از `payments.amount_irr` با `status='paid'`؛ خرید/ثبت‌نام از `profiles`/`subscriptions`. روی هر MV `UNIQUE INDEX` برای امکان `REFRESH ... CONCURRENTLY`.
+
+### ۷.۴. جدول خلاصه و زمان‌بندی رفرش
+> فایل: `landing_supabase/admin_db_bridge/sql/02_summary_refresh.sql`
+- تابع `marketing.refresh_all()` که همه‌ی MVها را `REFRESH MATERIALIZED VIEW CONCURRENTLY` می‌کند.
+- زمان‌بندی با `pg_cron` (مثلاً هر ۳۰ دقیقه): `cron.schedule('mkt_refresh','*/30 * * * *', $$ SELECT marketing.refresh_all(); $$);`
+- داشبورد همیشه از MVها می‌خواند (نه JOIN زنده)، پس FDW فقط در لحظه‌ی رفرش بار می‌گیرد.
+
+### ۷.۵. قرارداد اکشن‌های جدید `admin-api` (مارکتینگ)
+> همان Gateway تک‌فانکشنه؛ روتینگ بر اساس `action`. همه با `service_role` روی دیتابیس اصلی، فقط SELECT از اسکیمای `marketing` (و یک UPSERT روی `campaigns_fdw`).
+
+| action | ورودی | خروجی (DTO) | عملیات سرور |
+|---|---|---|---|
+| `marketing_traffic` | `{ range? }` | `TrafficOverview` | select از `mv_traffic_overview` |
+| `marketing_funnel` | `{ channel? }` | `FunnelStage[]` | select از `mv_funnel_by_channel` |
+| `marketing_purchase_timing` | `{ channel? }` | `PurchaseTimingRow[]` | select از `mv_purchase_timing` |
+| `marketing_retention` | — | `RetentionRow[]` | select از `mv_retention_by_channel` |
+| `marketing_roi` | — | `ChannelRoiRow[]` | select از `mv_channel_roi` |
+| `marketing_campaigns` | — | `CampaignSummary[]` | select از `campaigns_fdw` + خلاصه |
+| `marketing_campaign_detail` | `{ utm_campaign }` | `CampaignDetail` | select از `mv_campaign_detail` فیلترشده |
+| `marketing_save_campaign` | `{ utm_campaign, channel, source_name, start_date, end_date, cost_irr, notes }` | `{ ok }` | UPSERT روی `campaigns_fdw` (نوشتن از طریق FDW) |
+
+### ۷.۶. قوانین درخت فایل (منطق مسیردهی این ماژول)
+**فایل‌هایی که ساخته می‌شوند:**
+- `landing_supabase/analytics_db/sql/00_extensions.sql` (pgcrypto)
+- `landing_supabase/analytics_db/sql/01_events.sql`
+- `landing_supabase/analytics_db/sql/02_campaigns.sql`
+- `landing_supabase/analytics_db/sql/03_rls.sql`
+- `landing_supabase/admin_db_bridge/sql/00_fdw_setup.sql`
+- `landing_supabase/admin_db_bridge/sql/01_report_views.sql`
+- `landing_supabase/admin_db_bridge/sql/02_summary_refresh.sql`
+- `landing_supabase/README.md` (نقشه‌ی اجرا: کدام فایل روی کدام پروژه اجرا شود)
+- `src/pages/MarketingDashboard.tsx`
+- `src/components/charts/FunnelChart.tsx`
+- `src/components/charts/RetentionMatrix.tsx`
+- `src/components/marketing/ChannelRoiTable.tsx`
+- `src/components/marketing/CampaignEditorModal.tsx`
+
+**فایل‌هایی که ویرایش می‌شوند (در همین ریپو):**
+- `supabase/functions/admin-api/index.ts` (افزودن caseهای `marketing_*` — هیچ کلاینت دومی؛ فقط select از اسکیمای `marketing`)
+- `src/lib/supabase.ts` (افزودن DTOهای مارکتینگ — Anti-Corruption Layer)
+- `src/lib/dataStore.ts` (افزودن متدهای `getMarketing*` / `saveMarketingCampaign`)
+- `src/store/adminStore.ts` (افزودن `'marketing'` به `ActiveTab`)
+- `src/components/layout/AdminLayout.tsx` (افزودن آیتم منو «مارکتینگ»)
+- `src/App.tsx` (رندر `MarketingDashboard` وقتی `activeTab === 'marketing'`)
+
+> یادداشت: پوشه‌های تکراریِ روتِ `components/` و `pages/` نسخه‌های قدیمی/AI-Studio‌اند؛ سورس معتبر فقط `src/` است (طبق `index.html → /src/main.tsx`). هیچ فایل جدیدی در روت ساخته نشود.
+
+### ۷.۷. متغیرها / Secrets این ماژول
+**روی Supabase اصلی (Vault، برای FDW):**
+- `analytics_db_host`, `analytics_db_port`, `analytics_db_name`, `analytics_db_user`, `analytics_db_password` (اعتبارنامه‌ی اتصال FDW به دیتابیس تحلیلی).
+
+**روی Edge Function `admin-api`:** متغیر جدیدی لازم نیست؛ همان `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `ADMIN_API_SECRET` کفایت می‌کند (گزارش‌ها از همان دیتابیس اصلی خوانده می‌شوند).
+
+**سمت لندینگ‌ها (خارج از این ریپو):** `ANALYTICS_SUPABASE_URL` و `ANALYTICS_ANON_KEY` برای ارسال رویداد (در تسک‌های پروژه‌های خارجی).
