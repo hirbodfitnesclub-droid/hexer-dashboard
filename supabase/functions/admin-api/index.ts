@@ -76,7 +76,7 @@ Deno.serve(async (req: Request) => {
 
           return {
             id: p.id,
-            email: authUser?.email || '',
+            email: authUser?.email || authUser?.phone || '',
             display_name: p.full_name || '',
             avatar_url: p.avatar_url || null,
             is_blocked: isBlocked,
@@ -549,7 +549,7 @@ Deno.serve(async (req: Request) => {
               avatar_url: profile.avatar_url,
               created_at: profile.created_at
             } : null,
-            email: authUser?.email || ''
+            email: authUser?.email || authUser?.phone || ''
           };
         });
 
