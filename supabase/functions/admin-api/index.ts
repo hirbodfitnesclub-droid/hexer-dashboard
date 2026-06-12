@@ -558,6 +558,178 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      case 'marketing_traffic': {
+        const { data, error } = await supabaseService
+          .schema('marketing')
+          .from('mv_traffic_overview')
+          .select('*');
+
+        if (error) throw error;
+
+        return new Response(JSON.stringify(data || []), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'marketing_funnel': {
+        const { channel } = body;
+        let query = supabaseService
+          .schema('marketing')
+          .from('mv_funnel_by_channel')
+          .select('*');
+
+        if (channel) {
+          query = query.eq('channel', channel);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        return new Response(JSON.stringify(data || []), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'marketing_purchase_timing': {
+        const { channel } = body;
+        let query = supabaseService
+          .schema('marketing')
+          .from('mv_purchase_timing')
+          .select('*');
+
+        if (channel) {
+          query = query.eq('channel', channel);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        return new Response(JSON.stringify(data || []), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'marketing_retention': {
+        const { data, error } = await supabaseService
+          .schema('marketing')
+          .from('mv_retention_by_channel')
+          .select('*');
+
+        if (error) throw error;
+
+        return new Response(JSON.stringify(data || []), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'marketing_roi': {
+        const { data, error } = await supabaseService
+          .schema('marketing')
+          .from('mv_channel_roi')
+          .select('*');
+
+        if (error) throw error;
+
+        return new Response(JSON.stringify(data || []), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'marketing_campaigns': {
+        const { data, error } = await supabaseService
+          .schema('marketing')
+          .from('campaigns_fdw')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        return new Response(JSON.stringify(data || []), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'marketing_campaign_detail': {
+        const { utm_campaign } = body;
+        if (!utm_campaign) throw new Error("پارامتر utm_campaign الزامی است");
+
+        const { data, error } = await supabaseService
+          .schema('marketing')
+          .from('mv_campaign_detail')
+          .select('*')
+          .eq('utm_campaign', utm_campaign)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        return new Response(JSON.stringify(data || null), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'marketing_save_campaign': {
+        const { utm_campaign, channel, source_name, start_date, end_date, cost_irr, notes, target_url } = body;
+        if (!utm_campaign || !channel) {
+          throw new Error("فیلدهای utm_campaign و channel الزامی هستند");
+        }
+
+        const payload = {
+          utm_campaign,
+          channel,
+          source_name: source_name || null,
+          start_date: start_date || null,
+          end_date: end_date || null,
+          cost_irr: cost_irr ? Number(cost_irr) : 0,
+          currency: 'IRR',
+          notes: notes || null,
+          target_url: target_url || null,
+          created_at: new Date().toISOString()
+        };
+
+        // ۱. بررسی وجود کمپین روی جدول خارجی بدون نیاز به تعهد به Constraint یکتا
+        const { data: existing, error: checkError } = await supabaseService
+          .schema('marketing')
+          .from('campaigns_fdw')
+          .select('utm_campaign')
+          .eq('utm_campaign', utm_campaign)
+          .maybeSingle();
+
+        if (checkError) throw checkError;
+
+        let saveError;
+        if (existing) {
+          // ۲. به‌روزرسانی فیلدهای کمپین ثبت‌شده
+          const { error: updateError } = await supabaseService
+            .schema('marketing')
+            .from('campaigns_fdw')
+            .update({
+              channel: payload.channel,
+              source_name: payload.source_name,
+              start_date: payload.start_date,
+              end_date: payload.end_date,
+              cost_irr: payload.cost_irr,
+              currency: payload.currency,
+              notes: payload.notes,
+              target_url: payload.target_url
+            })
+            .eq('utm_campaign', utm_campaign);
+          saveError = updateError;
+        } else {
+          // ۳. ایجاد سطر جدید در صورت عدم وجود
+          const { error: insertError } = await supabaseService
+            .schema('marketing')
+            .from('campaigns_fdw')
+            .insert(payload);
+          saveError = insertError;
+        }
+
+        if (saveError) throw saveError;
+
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: `عملیات ${action} پشتیبانی نمی‌شود` }), {
           status: 400,
