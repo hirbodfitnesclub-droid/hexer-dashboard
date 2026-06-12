@@ -16,6 +16,7 @@
 - `id UUID PK → auth.users.id`
 - `full_name TEXT`  ← ⚠️ نامِ واقعی ستون (نه `display_name`)
 - `avatar_url TEXT`, `timezone TEXT`, `onboarding_completed BOOL`, `specialty TEXT`, `interests TEXT[]`
+- `anonymous_id UUID` ← 🔑 آیدی کوکیِ هویتِ گمنام/لندینگ ترافیک (اتریبیوشن)
 - `created_at`, `updated_at`
 - **هیچ ستون `email` یا `is_blocked` ندارد.**
 
@@ -139,48 +140,16 @@ Postgres (همه‌ی ردیف‌ها، بدون محدودیت RLS)
 
 توسعه ساختار پایگاه داده و منطق Edge Function گیت‌وی جهش‌یافته جهت پیاده‌سازی هم‌زمان این فلوها:
 
-### ۶.۱. توسعه و فیلدهای جدید در پایگاه داده (PostgreSQL Extend Schema)
-برای پشتیبانی از فلوی آفلاین، علاوه بر جدول پرداخت‌های سنتی زیبال، فیلدها و کلاسترهای زیر به جداول اضافه یا بروز می‌شوند:
-
-۱. **جدول `public.payments`**:
-   - ستون `offline_receipt_url TEXT NULL`: نگه‌داری موقت آدرس رسید بارگذاری شده در Supabase Storage (سطل اختصاصی آفلاین).
-   - ستون `manual_decline_reason TEXT NULL`: علت رد رسید توسط ناظر پلتفرم جهت بازخوانی کلاینت.
-   - وضعیت جدید در فیلد `status`: مقدار `'pending_manual'` (فیش آفلاین ثبت شده و در انتظار رسیدگی ادمین) اضافه می‌شود. مقدار موفق همچنان `'paid'` است.
-
-۲. **رویه رزرو و آزادسازی تخفیف (`discount_codes` Reservation Logic)**:
-   - در لحظه کلیکِ ثبت پرداخت کارت به کارت توسط کاربر، یک فیش پرداخت در جدول با وایت‌استاتوس `'pending_manual'` ایجاد شده و در صورتی که کد تخفیفی همراه آن باشد، سهمیه استفاده شده کوپن در همان ثانیه ارتقا می‌یابد (`used_count = used_count + 1`).
-   - در صورت رد فیش توسط ادمین در پنل، فرآیند رول‌بک اجرا شده و سهمیه کوپن متناظر کسر شده بازگردانی می‌گردد (`used_count = used_count - 1`).
-
-### ۶.۲. جریان کاربری آپلود و ذخیره‌سازی شیء (Client Compress & Storage Stream)
-```text
-رسید تصویر (کاربر) ──► فشرده‌سازی کلاینت (Canvas API) < 500KB ──► آپلود در Storage سطل 'receipts' ──► ثبت تراکنش با 'pending_manual'
-```
-
-- برای مدیریت بهینه حجم در پلن رایگان سوپابیس، آپلود عکس بر روی سطل خصوصی `'receipts'` انجام شده و پس از تایید یا رد بلافاصله متد حذفیِ `storage.from('receipts').remove([filePath])` از داخل Edge Function با لایسنس `service_role` فراخوانی می‌گردد. وب‌اپ هیچ رسید نهایی یا موقتی را در Storage برای مدت طولانی انبار نخواهد کرد.
-
-### ۶.۳. توسعه قرارداد اکشن‌های Gateway ادمین (`admin-api` Actions Extension)
-
-درخواست‌های مدیریت کارت به کارت با فرستادن پلودهای زیر بررسی می‌شوند:
-
-| action | فیلد ورودی بدنه | نتیجه و نحوه پاسخ دهی | وظیفه تراکنشی درگاه سرور |
-|---|---|---|---|
-| `list_manual_payments` | — | `Payment[]` | واکشی ردیف‌های پرداخت با وضعیت `'pending_manual'` به همراه آدرس فیش آفلاین و مشخصات کاربر. |
-| `approve_manual_payment` | `{ payment_id, user_id }` | `{ ok: true }` | ۱. فراخوانی پروسجر `activate_subscription` دیتابیس (تغییر اشتراک به فعال و پرداخت به `'paid'`). ۲. حذف دائم رسید تصویر از Storage. |
-| `reject_manual_payment` | `{ payment_id, user_id, reason }` | `{ ok: true }` | ۱. تغییر وضعیت پرداخت به `'failed'`. ۲. ثبت پاسخ در ستون `manual_decline_reason`. ۳. آزادسازی کوپن تخفیف رزروی (در صورت وجود). ۴. حذف دائم رسید تصویر از Storage. |
-
-
----
-
-## ۷. معماری ماژول مارکتینگ و اتریبیوشن (Marketing Analytics Architecture)
+### ۶.۱. توسعه و فیلدهای جدید در پایگاه داده (PostgreSQL Extend## ۷. معماری ماژول مارکتینگ و اتریبیوشن (Marketing Analytics Architecture)
 
 ### ۷.۰. تصمیم معماری کلیدی (محل سکونت FDW و Viewها) — لنگرگاه
 - دو دیتابیس مجزا: **«تحلیلی»** (events، campaigns) و **«اصلی/اپ»** (profiles، subscriptions، payments، plans).
 - طبق گزارش، **پنل ادمین جداول تحلیلی را با FDW می‌خواند و با داده‌ی کاربر/خرید JOIN می‌زند**؛ و طبق محدودیت کارفرما **ارتباط دو دیتابیس فقط FDW است**. نتیجه‌ی منطقی: اکستنشن `postgres_fdw`، foreign tableها و **همه‌ی Materialized View‌های گزارش روی دیتابیس اصلی** مستقر می‌شوند (همان کانکشنی که `admin-api` از قبل دارد). داشبورد هیچ کانکشن دومی به دیتابیس تحلیلی باز نمی‌کند.
-- **تطبیق با محدودیت دایرکتوری:** با وجود اینکه «بریجِ FDW + Viewها» روی دیتابیس اصلی اجرا می‌شوند، **فایل‌های SQL آن‌ها فیزیکاً زیر `landing_supabase/admin_db_bridge/` قرار می‌گیرند** تا پوشه‌ی `supabase/` کاملاً دست‌نخورده بماند و تمام SQL مرتبط با تحلیل در یک‌جا (`landing_supabase/`) متمرکز باشد. این یک انتخاب آگاهانه‌ی معمار است.
+- **تطبیق با محدودیت دایرکتوری و نحوه مدیریت مهاجرت‌ها:** جهت حفظ یکپارچگی تاریخچه پایگاه داده اصلیِ پلتفرم و بر اساس استراتژی جدید معماری، تمامی فایل‌ها و اسکریپت‌های مربوط به دیتابیس اصلی (مانند راه‌اندازی FDW، ساخت Materialized Viewهای گزارشات مارکتینگ و تعریف Cron Jobها) دقیقاً به انتهای صف مهاجرت‌های موجود در پوشه `supabase/sql/` (مثلاً با پیشوندهای ۳۶ و ۳۷ و ۳۸) اضافه خواهند شد. به تبع آن، پوشه‌ی `admin_db_bridge` کاملاً لغو و حذف شده و اسکریپت‌های مربوط به دیتابیس تحلیلی جدید نیز به صورت خطی در دایرکتوری `landing_supabase/sql/` ساخته می‌شوند.
 - **اصل data-gravity:** جمع‌سازی سنگین روی دیتابیسی که داده‌ی پرحجم (`events`) دارد منطقی‌تر بود، اما چون «خواندن از سمت پنل ادمین» و «فقط FDW» دو الزام صریح‌اند، Viewها روی اصلی می‌مانند و فقط ستون‌های لازم رویداد از طریق foreign table کشیده می‌شوند. برای جلوگیری از افت، خروجی به‌صورت Materialized + ایندکس‌گذاری‌شده نگه‌داری می‌شود.
 
 ### ۷.۱. اسکیمای دیتابیس تحلیلی (روی پروژه‌ی Supabase «تحلیلی»)
-> فایل‌ها: `landing_supabase/analytics_db/sql/*`
+> فایل: `landing_supabase/sql/01_analytics_schema.sql` (حاوی ساختار جداول تحلیلی به صورت خطی)
 
 **`public.events`** (پرحجم‌ترین جدول؛ هر بازدید/کلیک یک رکورد)
 | فیلد | نوع | توضیح |
@@ -198,7 +167,7 @@ Postgres (همه‌ی ردیف‌ها، بدون محدودیت RLS)
 | `referrer` | `TEXT` | |
 | `created_at` | `TIMESTAMPTZ DEFAULT now()` | |
 
-ایندکس‌ها: `(anonymous_id)`، `(utm_campaign)`، `(created_at)`، `(event_type)`.
+اینکدس‌ها: `(anonymous_id)`، `(utm_campaign)`، `(created_at)`، `(event_type)`.
 
 **`public.campaigns`** (دفترچه‌ی کمپین‌ها — مرجع گزارش ۶.۰)
 | فیلد | نوع | توضیح |
@@ -213,20 +182,20 @@ Postgres (همه‌ی ردیف‌ها، بدون محدودیت RLS)
 | `notes` | `TEXT` | |
 | `created_at` | `TIMESTAMPTZ DEFAULT now()` | |
 
-**RLS دیتابیس تحلیلی:** روی هر دو جدول RLS فعال. روی `events` فقط `INSERT` برای نقش `anon` (لندینگ‌ها رویداد می‌فرستند)؛ **هیچ SELECT عمومی**. روی `campaigns` نه INSERT/SELECT عمومی — مدیریت کمپین فقط از سمت پنل (از طریق FDW با نقش بریج) انجام می‌شود.
+**RLS دیتابیس تحلیلی:** روی هر دو جدول RLS فعال است. روی `events` فقط یک Policy برای عملیات `INSERT` برای نقش `anon` وجود دارد (لندینگ‌ها رویداد می‌فرستند) و هیچ دسترسی `SELECT` عمومی وجود ندارد. به دلایل امنیتی در محیط Supabase و رعایت اصل حداقل دسترسی (Least Privilege)، اتصال FDW به هیچ وجه نباید با کاربر سوپریوزر (`postgres`) انجام شود. به جای آن، باید یک نقش (Role) اختصاصی به نام `mkt_bridge_user` در دیتابیس تحلیلی ایجاد شده و سیاست‌های RLS جدول `campaigns` طوری تنظیم شود که فقط به این نقش اختصاصی اجازه خواندن و نوشتن (UPSERT/SELECT/INSERT/UPDATE) داده شود. بدین ترتیب مدیریت کمپین فقط از سمت پنل ادمین دیتابیس اصلی (از طریق FDW با نقش بریج اختصاصی) بدون دسترسی سوپریوزر ایمن می‌شود.
 
 ### ۷.۲. لایه‌ی بریج FDW (روی پروژه‌ی Supabase «اصلی»)
-> فایل: `landing_supabase/admin_db_bridge/sql/00_fdw_setup.sql` (idempotent)
+> فایل: `supabase/sql/36_marketing_fdw.sql` (مهاجرت شماره ۳۶ دیتابیس اصلی)
 - `CREATE EXTENSION IF NOT EXISTS postgres_fdw;`
 - اعتبارنامه‌ی اتصال به دیتابیس تحلیلی در **Supabase Vault** (`vault.create_secret(...)`)؛ هرگز هاردکد نشود.
-- `CREATE SERVER analytics_srv ...` + `CREATE USER MAPPING ...` با خواندن secret از Vault.
+- `CREATE SERVER analytics_srv ...` + `CREATE USER MAPPING ...` با خواندن secret از Vault به طوری که کاربر دیتابیس اصلی به نقش اختصاصی `mkt_bridge_user` متصل شود (اتصال مستقیم با یوزر `postgres` شدیداً ممنوع است).
 - ساخت اسکیمای اختصاصی `marketing` روی دیتابیس اصلی (جداسازی کامل از اشیای اپ).
 - foreign tableها فقط برای ستون‌های لازم: `marketing.events_fdw`, `marketing.campaigns_fdw`.
 - **گرنت:** دسترسی SELECT روی foreign tableها فقط به `service_role` (نه `anon`/`authenticated`).
 - `campaigns_fdw` به‌صورت **قابل‌نوشتن** تعریف می‌شود تا اکشن `marketing_save_campaign` بتواند با همان FDW در دفترچه‌ی کمپین بنویسد.
 
 ### ۷.۳. شش گروه گزارش به‌صورت Materialized View (روی دیتابیس اصلی، اسکیمای `marketing`)
-> فایل: `landing_supabase/admin_db_bridge/sql/01_report_views.sql`
+> فایل: `supabase/sql/37_marketing_views.sql` (مهاجرت شماره ۳۷ دیتابیس اصلی)
 - **کلید اتریبیوشن:** `profiles.anonymous_id` ⨝ `events_fdw.anonymous_id`. مدل **first-touch**: برای هر `anonymous_id` قدیمی‌ترین رویدادِ دارای UTM به‌عنوان منبع انتساب داده می‌شود.
 - نگاشت گزارش‌ها (مطابق بخش ۶ گزارش مرجع):
   1. `mv_traffic_overview` (۶.۱): بازدیدکننده‌ی یکتا در بازه‌های امروز/۷روز/۳۰روز × منبع (هر UTM + «مستقیم») × `landing_host`؛ به‌علاوه شمار کلیک «ورود» در برابر «شروع رایگان».
@@ -238,7 +207,7 @@ Postgres (همه‌ی ردیف‌ها، بدون محدودیت RLS)
 - درآمد از `payments.amount_irr` با `status='paid'`؛ خرید/ثبت‌نام از `profiles`/`subscriptions`. روی هر MV `UNIQUE INDEX` برای امکان `REFRESH ... CONCURRENTLY`.
 
 ### ۷.۴. جدول خلاصه و زمان‌بندی رفرش
-> فایل: `landing_supabase/admin_db_bridge/sql/02_summary_refresh.sql`
+> فایل: `supabase/sql/38_marketing_cron.sql` (مهاجرت شماره ۳۸ دیتابیس اصلی)
 - تابع `marketing.refresh_all()` که همه‌ی MVها را `REFRESH MATERIALIZED VIEW CONCURRENTLY` می‌کند.
 - زمان‌بندی با `pg_cron` (مثلاً هر ۳۰ دقیقه): `cron.schedule('mkt_refresh','*/30 * * * *', $$ SELECT marketing.refresh_all(); $$);`
 - داشبورد همیشه از MVها می‌خواند (نه JOIN زنده)، پس FDW فقط در لحظه‌ی رفرش بار می‌گیرد.
@@ -259,14 +228,11 @@ Postgres (همه‌ی ردیف‌ها، بدون محدودیت RLS)
 
 ### ۷.۶. قوانین درخت فایل (منطق مسیردهی این ماژول)
 **فایل‌هایی که ساخته می‌شوند:**
-- `landing_supabase/analytics_db/sql/00_extensions.sql` (pgcrypto)
-- `landing_supabase/analytics_db/sql/01_events.sql`
-- `landing_supabase/analytics_db/sql/02_campaigns.sql`
-- `landing_supabase/analytics_db/sql/03_rls.sql`
-- `landing_supabase/admin_db_bridge/sql/00_fdw_setup.sql`
-- `landing_supabase/admin_db_bridge/sql/01_report_views.sql`
-- `landing_supabase/admin_db_bridge/sql/02_summary_refresh.sql`
-- `landing_supabase/README.md` (نقشه‌ی اجرا: کدام فایل روی کدام پروژه اجرا شود)
+- `landing_supabase/sql/01_analytics_schema.sql` (شامل کل اسکیمای دیتابیس تحلیلی، جداول events و campaigns، اکستنشن‌ها، به همراه سیاست‌های RLS مربوط به نقش mkt_bridge_user و anon)
+- `supabase/sql/36_marketing_fdw.sql` (راه‌اندازی fdw، ساخت سرور، سکوت رول‌ها و فایروال دسترسی‌ها به اسکیمای marketing)
+- `supabase/sql/37_marketing_views.sql` (ایجاد هر شش Materialized View گزارشات به همراه ایندکس‌های یکتا با coalesce)
+- `supabase/sql/38_marketing_cron.sql` (تابع رفرش و کرون جاب برای زمان‌بندی pg_cron متصل به marketing.refresh_all)
+- `landing_supabase/README.md` (نقشه‌ی اجرای یکپارچه بدون تداخل پوشه‌ها)
 - `src/pages/MarketingDashboard.tsx`
 - `src/components/charts/FunnelChart.tsx`
 - `src/components/charts/RetentionMatrix.tsx`
@@ -286,6 +252,7 @@ Postgres (همه‌ی ردیف‌ها، بدون محدودیت RLS)
 ### ۷.۷. متغیرها / Secrets این ماژول
 **روی Supabase اصلی (Vault، برای FDW):**
 - `analytics_db_host`, `analytics_db_port`, `analytics_db_name`, `analytics_db_user`, `analytics_db_password` (اعتبارنامه‌ی اتصال FDW به دیتابیس تحلیلی).
+  - `analytics_db_password: 'SecureBridgePassword123!'`
 
 **روی Edge Function `admin-api`:** متغیر جدیدی لازم نیست؛ همان `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `ADMIN_API_SECRET` کفایت می‌کند (گزارش‌ها از همان دیتابیس اصلی خوانده می‌شوند).
 

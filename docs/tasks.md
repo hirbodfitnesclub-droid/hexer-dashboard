@@ -113,41 +113,51 @@ CONTEXT_FILES: ["src/pages/Dashboard.tsx", "src/lib/dataStore.ts", "src/lib/supa
 
 ## TASK 7 — اسکیمای دیتابیس تحلیلی: events + campaigns + RLS [فاز مارکتینگ]
 **راهنمای پیاده‌سازی:**
-1. دایرکتوری جدید `landing_supabase/analytics_db/sql/` بساز. این فایل‌ها روی **پروژه‌ی Supabase تحلیلی** اجرا می‌شوند (نه اصلی).
-2. `00_extensions.sql`: `CREATE EXTENSION IF NOT EXISTS pgcrypto;`
-3. `01_events.sql`: جدول `public.events` دقیقاً با ستون‌های جدول بخش ۷.۱ ARCHITECTURE (کلید `BIGINT IDENTITY`, `anonymous_id UUID`, `event_type`, پنج فیلد UTM, `landing_host`, `page_path`, `referrer`, `created_at`) + چهار ایندکس.
-4. `02_campaigns.sql`: جدول `public.campaigns` با `utm_campaign` به‌عنوان PK و فیلدهای هزینه/تاریخ/کانال.
-5. `03_rls.sql`: فعال‌سازی RLS؛ روی `events` فقط policy از نوع `INSERT` برای نقش `anon`؛ بدون policy برای SELECT. روی `campaigns` بدون policy عمومی.
-**محدودیت‌های تسک:** همه idempotent (`IF NOT EXISTS` / `DROP POLICY IF EXISTS`). هیچ فایلی زیر `supabase/` ساخته/ویرایش نشود. بدون داده‌ی seed واقعی.
+1. ساخت فایل اسکیما در مسیر `landing_supabase/sql/01_analytics_schema.sql` که روی **پروژه‌ی Supabase تحلیلی جدید** اجرا می‌شود (نه دیتابیس اصلی).
+2. راه‌اندازی ملزومات: `CREATE EXTENSION IF NOT EXISTS pgcrypto;`
+3. جدول `public.events` دقیقاً با ستون‌های مشخص‌شده در بخش ۷.۱ سند معماری (کلید `BIGINT IDENTITY`, `anonymous_id UUID`, `event_type`, پنج فیلد UTM, `landing_host`, `page_path`, `referrer`, `created_at`) به همراه ۴ ایندکس بهینه روی آن.
+4. جدول `public.campaigns` با `utm_campaign` به‌عنوان کلید اصلی (PK) و فیلدهای شناسه هزینه، تاریخ، کانال، و یادداشت‌ها.
+5. فعال‌سازی RLS: روی جدول `events` فقط سیاست (Policy) از نوع `INSERT` برای نقش `anon` تعریف شود (بدون دسترسی عمومی برای SELECT). همچنین ابتدا نقش اختصاصی `mkt_bridge_user` با رمز عبور 'SecureBridgePassword123!' و خصیصه WITH LOGIN بدون دسترسی‌های سوپریوزر ایجاد شده و سیاست RLS جدول `campaigns` به گونه‌ای تعریف شود که فقط و فقط این نقش به صورت انحصاری دسترسی کامل (INSERT, UPDATE, SELECT) به آن داشته باشد. هیچ policy عمومی دیگری روی آن فعال نگردد.
+**محدودیت‌های تسک:** تمامی کدها باید idempotent باشند. مسیر فایل خروجی دقیقاً `landing_supabase/sql/01_analytics_schema.sql` است. هیچ فایلی زیر پوشه `supabase/` در این تسک ساخته نشود. بدون داده‌ی seed صوری یا اضافی.
 CONTEXT_FILES: ["docs/ARCHITECTURE.md", "supabase/sql/01_profiles.sql", "supabase/sql/12_rls.sql"]
 
 ## TASK 8 — بریج FDW + Vault + foreign tables روی دیتابیس اصلی [فاز مارکتینگ]
 **راهنمای پیاده‌سازی:**
-1. فایل `landing_supabase/admin_db_bridge/sql/00_fdw_setup.sql` (اجرا روی **Supabase اصلی**).
+1. ساخت فایل مهاجرت در دیتابیس اصلی پلتفرم در مسیر `supabase/sql/36_marketing_fdw.sql` (به عنوان جزئی از صف مهاجرت‌های متوالی دیتابیس اصلی).
 2. `CREATE EXTENSION IF NOT EXISTS postgres_fdw;` و `CREATE SCHEMA IF NOT EXISTS marketing;`
-3. اعتبارنامه‌ی اتصال به دیتابیس تحلیلی را از **Vault** بخوان (`vault.decrypted_secrets`)، سپس `CREATE SERVER analytics_srv` و `CREATE USER MAPPING`.
-4. `IMPORT FOREIGN SCHEMA` یا `CREATE FOREIGN TABLE` برای `marketing.events_fdw` و `marketing.campaigns_fdw` (فقط ستون‌های لازم).
-5. `REVOKE ALL ... FROM anon, authenticated;` و `GRANT SELECT ... TO service_role;` روی foreign tableها. `campaigns_fdw` باید قابل‌نوشتن بماند (برای UPSERT کمپین).
-**محدودیت‌های تسک:** هیچ اعتبارنامه‌ای هاردکد نشود. فقط اسکیمای `marketing` ساخته شود (هیچ شیء اپ لمس نشود). idempotent.
-CONTEXT_FILES: ["docs/ARCHITECTURE.md", "landing_supabase/analytics_db/sql/01_events.sql", "landing_supabase/analytics_db/sql/02_campaigns.sql"]
+3. خواندن امن اطلاعات اتصال سرور تحلیلی از **Vault** دیتابیس اصلی و ساخت `CREATE SERVER analytics_srv` به همراه `CREATE USER MAPPING`. در زمان اتصال، حتماً کاربر جاری به نقش اختصاصیِ امن `mkt_bridge_user` در دیتابیس تحلیلی مپ شود و رمز عبور اتصال برای این نقش باید دقیقاً 'SecureBridgePassword123!' قرار داده شود. هرگونه اتصال مستقیم با نقش سوپریوزر یا `postgres` به دلیل نقض شدید امنیت ممنوع است.
+4. تعریف و ایمپورت جداول خارجی با `CREATE FOREIGN TABLE` برای `marketing.events_fdw` و `marketing.campaigns_fdw` (با ستون‌های ضروری).
+5. محدودسازی دسترسی کلاینت: اعمال `REVOKE ALL` برای anon و authenticated و اعطای دسترسی `GRANT SELECT` تنها به `service_role` روی جداول خارجی. جدول `campaigns_fdw` باید برای اعمال تغییرات از پنل ادمین قابل نوشتن بماند.
+**محدودیت‌های بسیار مهم تسک:**
+- مسیر فایل خروجی دقیقاً دیتابیس اصلی: `supabase/sql/36_marketing_fdw.sql` است.
+- **تذکر فوق حیاتی:** برنامه‌نویس حق ندارد هیچگونه جدول یا نمای واقعی در اسکیمای `public` دیتابیس اصلی (مانند `profiles` یا `payments`) در این اسکریپت بسازد یا دستکاری کند. باید فرض کند این جداول از طریق فایل‌های دیتابیس 01 تا 35 از قبل روی دیتابیس اصلی مستقر شده‌اند.
+- سکیوریتی مپینگ و فرایتینگ فقط روی اسکیمای مجزای `marketing` اعمال شود.
+CONTEXT_FILES: ["docs/ARCHITECTURE.md", "landing_supabase/sql/01_analytics_schema.sql"]
 
 ## TASK 9 — شش Materialized View گزارش [فاز مارکتینگ]
 **راهنمای پیاده‌سازی:**
-1. فایل `landing_supabase/admin_db_bridge/sql/01_report_views.sql` (روی **Supabase اصلی**، اسکیمای `marketing`).
-2. کلید اتریبیوشن: first-touch روی `profiles.anonymous_id = events_fdw.anonymous_id`.
-3. شش ویو دقیقاً مطابق بخش ۷.۳: `mv_traffic_overview`, `mv_funnel_by_channel`, `mv_purchase_timing`, `mv_retention_by_channel`, `mv_channel_roi`, `mv_campaign_detail`.
-4. درآمد از `payments.amount_irr` با `status='paid'`؛ هزینه از `campaigns_fdw.cost_irr`. روی هر MV یک `UNIQUE INDEX` بساز (لازمه‌ی `REFRESH CONCURRENTLY`).
-**محدودیت‌های تسک:** فقط `CREATE MATERIALIZED VIEW IF NOT EXISTS`؛ جداول اپ فقط خوانده شوند. منطق CAC/ROI را داخل ویو نگه دار تا فرانت محاسبه نکند.
-CONTEXT_FILES: ["docs/ARCHITECTURE.md", "supabase/sql/02_billing.sql", "supabase/sql/04_payments.sql", "supabase/sql/01_profiles.sql", "landing_supabase/admin_db_bridge/sql/00_fdw_setup.sql"]
+1. ساخت فایل نمای گزارشات در مسیر انتهای صف مهاجرت‌های دیتابیس اصلی: `supabase/sql/37_marketing_views.sql` (در اسکیمای `marketing` دیتابیس اصلی).
+2. پیاده‌سازی کلید انتساب First-Touch با تطبیق `profiles.anonymous_id = events_fdw.anonymous_id`.
+3. تعریف هر ۶ نمای ماتریالیزه شده گزارش طبق جزییات بخش ۷.۳ معماری: `mv_traffic_overview`, `mv_funnel_by_channel`, `mv_purchase_timing`, `mv_retention_by_channel`, `mv_channel_roi`, `mv_campaign_detail`.
+4. بسیار حیاتی: برای جلوگیری از شکستِ درازمدتِ `REFRESH MATERIALIZED VIEW CONCURRENTLY` به دلیل وجود مقادیر احتمالی `NULL` در فیلدهای UTM، حتماً ایندکس یکتای ترکیبی روی ویوی `mv_traffic_overview` را با عبارت `COALESCE` (به عنوان مثال `COALESCE(utm_source, 'direct')`, `COALESCE(utm_medium, 'direct')`, `COALESCE(utm_campaign, 'direct')`, `landing_host`) بسازید. برای مابقی ۵ ویو نیز ایندکس‌های یکتای ترکیبی دقیق بر اساس کلیدهایی که تضمین‌کننده یکتایی سطرها بدون مشکل null هستند (مانند کانال و مرحله در `channel` / `stage` یا `utm_campaign`) تعریف کنید.
+5. محاسبات درآمد مبتنی بر مقادیر ستون `amount_irr` جدول پرداخت‌ها با شرط وضعیت `'paid'`؛ محاسبات هزینه بر اساس `cost_irr` جدول کمپین‌ها. روی هر MV یک `UNIQUE INDEX` بر اساس استراتژی بالا بساز (لازمه‌ی `REFRESH CONCURRENTLY` بدون خطا).
+**محدودیت‌های بسیار مهم تسک:**
+- مسیر فایل خروجی دقیقاً `supabase/sql/37_marketing_views.sql` است.
+- **تذکر فوق حیاتی:** برنامه‌نویس حق ندارد هیچگونه جدول واقعی در اسکیمای `public` دیتابیس اصلی (مانند `profiles` یا `payments`) در این اسکریپت بسازد، بازنویسی کند یا دستکاری نماید. باید فرض کند این جداول از طریق فایل‌های دیتابیس 01 تا 35 قبلاً در دیتابیس اصلی ساخته شده‌اند و صرفاً از روی آن‌ها بخواند.
+- منطق محاسبات مالی و CAC/ROI کلیداً داخل خود تحلیل لایه پایگاه داده (Materialized Views) متمرکز نگه داشته شود.
+CONTEXT_FILES: ["docs/ARCHITECTURE.md", "supabase/sql/02_billing.sql", "supabase/sql/04_payments.sql", "supabase/sql/01_profiles.sql", "supabase/sql/36_marketing_fdw.sql"]
 
 ## TASK 10 — تابع رفرش + زمان‌بندی pg_cron [فاز مارکتینگ]
 **راهنمای پیاده‌سازی:**
-1. فایل `landing_supabase/admin_db_bridge/sql/02_summary_refresh.sql` (روی **Supabase اصلی**).
-2. تابع `marketing.refresh_all()` که هر شش MV را `REFRESH MATERIALIZED VIEW CONCURRENTLY` می‌کند.
-3. `CREATE EXTENSION IF NOT EXISTS pg_cron;` و `cron.schedule('mkt_refresh','*/30 * * * *', $$ SELECT marketing.refresh_all(); $$);` (idempotent: ابتدا `cron.unschedule` در صورت وجود).
-4. فایل `landing_supabase/README.md` بساز و دقیقاً مشخص کن کدام فایل روی کدام پروژه (تحلیلی/اصلی) و با چه ترتیبی اجرا شود.
-**محدودیت‌های تسک:** بدون تغییر در ویوها؛ فقط رفرش و زمان‌بندی.
-CONTEXT_FILES: ["docs/ARCHITECTURE.md", "landing_supabase/admin_db_bridge/sql/01_report_views.sql"]
+1. ساخت فایل کرون دیتابیس اصلی در آخرین فاز صف جدید مهاجرت‌ها در مسیر `supabase/sql/38_marketing_cron.sql` (روی دیتابیس اصلی پلتفرم).
+2. ایجاد تابع `marketing.refresh_all()` برای ریفرش بهینه و همزمان تمام شش نمای ماتریالیزه شده با دستور `REFRESH MATERIALIZED VIEW CONCURRENTLY`.
+3. فعال‌سازی اکستنشن کرون به همراه تعریف جابِ زمان‌بندی شونده (مثلاً هر ۳۰ دقیقه): `cron.schedule('mkt_refresh','*/30 * * * *', $$ SELECT marketing.refresh_all(); $$);` (تحت فاز غیرفعال‌سازی جاب‌های قبلی اول کار برای تامین حالت idempotency).
+4. ایجاد مستند راهنمای `landing_supabase/README.md` جهت شفاف‌سازی و ترسیم دقیق چرخه راه‌اندازی و چگونگی ایمپورت و اجرای زنجیره فایل‌ها روی دیتابیس اصلی و تحلیلی.
+**محدودیت‌های بسیار مهم تسک:**
+- مسیر فایل خروجی دقیقاً `supabase/sql/38_marketing_cron.sql` است.
+- **تذکر فوق حیاتی:** برنامه‌نویس حق ندارد هیچگونه جدول واقعی در اسکیمای `public` دیتابیس اصلی (مانند `profiles` یا `payments`) در این اسکریپت بسازد یا دستکاری کند. باید فرض کند این جداول از طریق فایل‌های دیتابیس 01 تا 35 قبلاً ساخته شده‌اند.
+- عدم دخالت مستقیم در داخل طراحی مجدد ویوها؛ صرفاً فرآیند رفرش رول‌اوور شود.
+CONTEXT_FILES: ["docs/ARCHITECTURE.md", "supabase/sql/37_marketing_views.sql"]
 
 ## TASK 11 — توسعه‌ی Gateway ادمین با اکشن‌های مارکتینگ [فاز مارکتینگ]
 **راهنمای پیاده‌سازی:**

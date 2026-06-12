@@ -33,26 +33,28 @@ export const PlanDistributionChart: React.FC<PlanDistributionChartProps> = ({ da
   };
 
   return (
-    <div id="plan-distribution-chart-container" className="h-[300px] w-full flex flex-col justify-center">
-      <div id="chart-wrap" style={{ width: '100%', height: 300, minWidth: 0 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              innerRadius={60}
-              outerRadius={80}
-              paddingAngle={5}
-              dataKey="value"
-            >
-              {data.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip content={<CustomTooltip />} />
-          </PieChart>
-        </ResponsiveContainer>
+    <div id="plan-distribution-chart-container" className="h-[340px] w-full flex flex-col justify-center">
+      <div id="chart-wrap" className="w-full relative h-[300px]">
+        <div className="absolute inset-0">
+          <ResponsiveContainer width="99%" height={300}>
+            <PieChart>
+              <Pie
+                data={data}
+                cx="50%"
+                cy="50%"
+                innerRadius={60}
+                outerRadius={80}
+                paddingAngle={5}
+                dataKey="value"
+              >
+                {data.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip content={<CustomTooltip />} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       {/* Legend built to support fully customized RTL placement */}

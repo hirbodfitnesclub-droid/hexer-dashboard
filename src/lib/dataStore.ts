@@ -1,4 +1,18 @@
-import { Profile, Subscription, Payment, DiscountCode, Plan, SupportTicket } from './supabase';
+import {
+  Profile,
+  Subscription,
+  Payment,
+  DiscountCode,
+  Plan,
+  SupportTicket,
+  TrafficOverview,
+  FunnelStageRow,
+  PurchaseTimingRow,
+  RetentionRow,
+  ChannelRoiRow,
+  CampaignSummary,
+  CampaignDetail
+} from './supabase';
 import toast from 'react-hot-toast';
 
 const ADMIN_SECRET = '3128';
@@ -209,6 +223,103 @@ class DataService {
       return (data || []) as SupportTicket[];
     } catch (error) {
       console.error('Error fetching support tickets:', error);
+      throw error;
+    }
+  }
+
+  // Get Marketing Traffic Overview
+  async getMarketingTraffic(): Promise<TrafficOverview[]> {
+    try {
+      const data = await this.request('marketing_traffic');
+      return (data || []) as TrafficOverview[];
+    } catch (error: any) {
+      console.error('Error fetching marketing traffic:', error);
+      toast.error(error.message || 'خطا در دریافت آمار ترافیک مارکتینگ');
+      throw error;
+    }
+  }
+
+  // Get Marketing Funnel Analysis
+  async getMarketingFunnel(channel?: string): Promise<FunnelStageRow[]> {
+    try {
+      const data = await this.request('marketing_funnel', { channel });
+      return (data || []) as FunnelStageRow[];
+    } catch (error: any) {
+      console.error('Error fetching marketing funnel:', error);
+      toast.error(error.message || 'خطا در دریافت قیف تحلیل مارکتینگ');
+      throw error;
+    }
+  }
+
+  // Get Marketing Purchase Timing distribution
+  async getMarketingPurchaseTiming(channel?: string): Promise<PurchaseTimingRow[]> {
+    try {
+      const data = await this.request('marketing_purchase_timing', { channel });
+      return (data || []) as PurchaseTimingRow[];
+    } catch (error: any) {
+      console.error('Error fetching purchase timing:', error);
+      toast.error(error.message || 'خطا در دریافت زمان‌بندی خریدهای مارکتینگ');
+      throw error;
+    }
+  }
+
+  // Get Marketing Retention Cohort Analysis
+  async getMarketingRetention(): Promise<RetentionRow[]> {
+    try {
+      const data = await this.request('marketing_retention');
+      return (data || []) as RetentionRow[];
+    } catch (error: any) {
+      console.error('Error fetching marketing retention:', error);
+      toast.error(error.message || 'خطا در دریافت ماندگاری کاربران مارکتینگ');
+      throw error;
+    }
+  }
+
+  // Get Marketing Channel ROI Analysis
+  async getMarketingRoi(): Promise<ChannelRoiRow[]> {
+    try {
+      const data = await this.request('marketing_roi');
+      return (data || []) as ChannelRoiRow[];
+    } catch (error: any) {
+      console.error('Error fetching marketing ROI:', error);
+      toast.error(error.message || 'خطا در دریافت تحلیل نرخ بازگشت سرمایه');
+      throw error;
+    }
+  }
+
+  // Get Marketing Campaigns
+  async getMarketingCampaigns(): Promise<CampaignSummary[]> {
+    try {
+      const data = await this.request('marketing_campaigns');
+      return (data || []) as CampaignSummary[];
+    } catch (error: any) {
+      console.error('Error fetching marketing campaigns:', error);
+      toast.error(error.message || 'خطا در دریافت لیست کمپین‌ها');
+      throw error;
+    }
+  }
+
+  // Get Marketing Campaign Detail
+  async getMarketingCampaignDetail(utmCampaign: string): Promise<CampaignDetail | null> {
+    try {
+      const data = await this.request('marketing_campaign_detail', { utm_campaign: utmCampaign });
+      return data as CampaignDetail | null;
+    } catch (error: any) {
+      console.error('Error fetching marketing campaign detail:', error);
+      toast.error(error.message || 'خطا در دریافت جزئیات عملکرد کمپین');
+      throw error;
+    }
+  }
+
+  // Save/Upsert marketing campaign
+  async saveMarketingCampaign(payload: any): Promise<boolean> {
+    try {
+      await this.request('marketing_save_campaign', payload);
+      toast.success('کمپین با موفقیت در پایگاه داده ذخیره شد.');
+      return true;
+    } catch (error: any) {
+      console.error('Error saving marketing campaign:', error);
+      toast.error(error.message || 'خطا در ثبت اطلاعات کمپین');
       throw error;
     }
   }

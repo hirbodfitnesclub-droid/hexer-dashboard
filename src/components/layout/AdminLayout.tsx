@@ -11,7 +11,8 @@ import {
   ShieldAlert,
   User,
   Bell,
-  MessageSquare
+  MessageSquare,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -30,6 +31,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { id: 'manual_payments' as ActiveTab, label: 'تاییدات کارت به کارت', icon: CreditCard },
     { id: 'discounts' as ActiveTab, label: 'کدهای تخفیف', icon: Tag },
     { id: 'tickets' as ActiveTab, label: 'تیکت‌های پشتیبانی', icon: MessageSquare },
+    { id: 'marketing' as ActiveTab, label: 'تحلیل مارکتینگ', icon: TrendingUp },
   ];
 
   const handleTabClick = (tabId: ActiveTab) => {
