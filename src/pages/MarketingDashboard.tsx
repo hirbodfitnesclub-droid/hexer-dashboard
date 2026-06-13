@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { dataStore } from '../lib/dataStore';
+import { dataStore, sanitizeCampaignDetail } from '../lib/dataStore';
 import {
   TrafficOverview,
   FunnelStageRow,
@@ -79,11 +79,13 @@ export const MarketingDashboard: React.FC = () => {
       setPurchaseTiming(pt);
       setRetention(r);
       setRoi(roiData);
-      setCampaigns(camps);
+      
+      const activeCamps = (camps || []).filter(c => !c.notes?.includes('[DELETED]'));
+      setCampaigns(activeCamps);
 
       // Auto-select first campaign if exists
-      if (camps && camps.length > 0) {
-        setSelectedCampaignUtm(camps[0].utm_campaign);
+      if (activeCamps && activeCamps.length > 0) {
+        setSelectedCampaignUtm(activeCamps[0].utm_campaign);
       }
     } catch (err: any) {
       console.error(err);
@@ -145,7 +147,7 @@ export const MarketingDashboard: React.FC = () => {
       try {
         setLoadingCampaignDetail(true);
         const res = await dataStore.getMarketingCampaignDetail(selectedCampaignUtm);
-        setSelectedCampaignDetail(res);
+        setSelectedCampaignDetail(res ? sanitizeCampaignDetail(res) : null);
       } catch (err) {
         console.error(err);
         toast.error('خطا در دریافت عملکرد اختصاصی کمپین');
@@ -186,7 +188,8 @@ export const MarketingDashboard: React.FC = () => {
           dataStore.getMarketingCampaigns(),
           dataStore.getMarketingRoi()
         ]);
-        setCampaigns(updatedCamps);
+        const activeCamps = (updatedCamps || []).filter(c => !c.notes?.includes('[DELETED]'));
+        setCampaigns(activeCamps);
         setRoi(updatedRoi);
 
         // Update active selection to keep view fresh

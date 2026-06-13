@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ModalWrapper } from '../ui/ModalWrapper';
 import { CampaignSummary, CampaignDetail } from '../../lib/supabase';
-import { dataStore } from '../../lib/dataStore';
+import { dataStore, sanitizeCampaignDetail } from '../../lib/dataStore';
 import { format } from 'date-fns-jalali';
 import { 
   Eye, 
@@ -17,8 +17,10 @@ import {
   Check,
   Calendar,
   Coins,
-  Link
+  Link,
+  Trash2
 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
 interface CampaignsManagerModalProps {
   id: string;
@@ -42,14 +44,19 @@ export const CampaignsManagerModal: React.FC<CampaignsManagerModalProps> = ({
   const [detailError, setDetailError] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [copied, setCopied] = useState(false);
+  const [deletingUtm, setDeletingUtm] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch campaigns
   const fetchCampaignsList = async () => {
     setIsLoadingList(true);
     try {
       const list = await dataStore.getMarketingCampaigns();
+      // Filter out soft-deleted campaigns
+      const activeList = (list || []).filter(c => !c.notes?.includes('[DELETED]'));
+      
       // Sort descending by start_date or created_at
-      const sorted = [...list].sort((a, b) => {
+      const sorted = [...activeList].sort((a, b) => {
         const dateA = a.start_date ? new Date(a.start_date).getTime() : new Date(a.created_at).getTime();
         const dateB = b.start_date ? new Date(b.start_date).getTime() : new Date(b.created_at).getTime();
         return dateB - dateA;
@@ -62,12 +69,49 @@ export const CampaignsManagerModal: React.FC<CampaignsManagerModalProps> = ({
     }
   };
 
+  const handleSoftDeleteCampaign = async (campaign: CampaignSummary) => {
+    setIsDeleting(true);
+    try {
+      const existingNotes = campaign.notes ? campaign.notes.trim() : '';
+      const updatedNotes = existingNotes 
+        ? `${existingNotes} [DELETED]` 
+        : '[DELETED]';
+      
+      const payload = {
+        utm_campaign: campaign.utm_campaign,
+        channel: campaign.channel,
+        source_name: campaign.source_name,
+        cost_irr: campaign.cost_irr,
+        currency: campaign.currency,
+        start_date: campaign.start_date,
+        end_date: campaign.end_date,
+        target_url: campaign.target_url,
+        notes: updatedNotes
+      };
+      
+      const success = await dataStore.saveMarketingCampaign(payload);
+      if (success) {
+        toast.success(`کمپین "${campaign.utm_campaign}" با موفقیت حذف شد.`);
+        setDeletingUtm(null);
+        await fetchCampaignsList();
+      } else {
+        toast.error('خطا در حذف کمپین.');
+      }
+    } catch (err: any) {
+      console.error('Error soft deleting campaign:', err);
+      toast.error('خطا در حذف کمپین: ' + (err.message || ''));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       setView('list');
       setDetail(null);
       setSelectedUtm(null);
       setDetailError(false);
+      setDeletingUtm(null);
       fetchCampaignsList();
     }
   }, [isOpen]);
@@ -95,9 +139,9 @@ export const CampaignsManagerModal: React.FC<CampaignsManagerModalProps> = ({
           roi: cost_irr > 0 ? -100 : 0,
           cac: 0,
         };
-        setDetail(fallbackDetail);
+        setDetail(sanitizeCampaignDetail(fallbackDetail));
       } else {
-        setDetail(data);
+        setDetail(sanitizeCampaignDetail(data));
       }
     } catch (err) {
       console.error('Error fetching campaign detail:', err);
@@ -212,15 +256,47 @@ export const CampaignsManagerModal: React.FC<CampaignsManagerModalProps> = ({
                               {formatToman(c.cost_irr)}
                             </td>
                             <td className="p-3 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleShowDetail(c.utm_campaign)}
-                                className="p-1.5 bg-brand-500/10 hover:bg-brand-500 text-brand-400 hover:text-white rounded-lg border border-brand-500/20 transition-all cursor-pointer inline-flex items-center gap-1 font-bold text-[10px]"
-                                title="مشاهده آمار عملکرد"
-                              >
-                                <Eye className="w-3.5 h-3.5" />
-                                <span>آمار</span>
-                              </button>
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleShowDetail(c.utm_campaign)}
+                                  className="p-1.5 bg-brand-500/10 hover:bg-brand-500 text-brand-400 hover:text-white rounded-lg border border-brand-500/20 transition-all cursor-pointer inline-flex items-center gap-1 font-bold text-[10px]"
+                                  title="مشاهده آمار عملکرد"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>آمار</span>
+                                </button>
+                                
+                                {deletingUtm === c.utm_campaign ? (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={isDeleting}
+                                      onClick={() => handleSoftDeleteCampaign(c)}
+                                      className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[9px] font-bold transition-all cursor-pointer"
+                                    >
+                                      تایید حذف
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeletingUtm(null)}
+                                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[9px] font-bold transition-all cursor-pointer"
+                                    >
+                                      لغو
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeletingUtm(c.utm_campaign)}
+                                    className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg border border-rose-500/20 transition-all cursor-pointer inline-flex items-center gap-1 font-bold text-[10px]"
+                                    title="حذف کامل کمپین"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>حذف</span>
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -253,14 +329,46 @@ export const CampaignsManagerModal: React.FC<CampaignsManagerModalProps> = ({
                             <span className="text-[10px] text-slate-500 block">هزینه کل:</span>
                             <span className="font-mono font-bold text-emerald-400">{formatToman(c.cost_irr)}</span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleShowDetail(c.utm_campaign)}
-                            className="px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded-lg transition-all cursor-pointer inline-flex items-center gap-1 text-[11px] font-bold"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>مشاهده آمار</span>
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleShowDetail(c.utm_campaign)}
+                              className="px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded-lg transition-all cursor-pointer inline-flex items-center gap-1 text-[11px] font-bold"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>آمار</span>
+                            </button>
+
+                            {deletingUtm === c.utm_campaign ? (
+                              <div className="flex items-center gap-1 bg-slate-900/60 p-1 border border-slate-800 rounded-lg">
+                                <button
+                                  type="button"
+                                  disabled={isDeleting}
+                                  onClick={() => handleSoftDeleteCampaign(c)}
+                                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer"
+                                >
+                                  تایید حذف
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingUtm(null)}
+                                  className="px-2.5 py-1 bg-slate-855 hover:bg-slate-800 text-slate-300 rounded-lg text-[10px] font-bold transition-all cursor-pointer"
+                                >
+                                  لغو
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setDeletingUtm(c.utm_campaign)}
+                                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-lg transition-all cursor-pointer inline-flex items-center gap-1 text-[11px] font-bold"
+                                title="حذف کامل کمپین"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>حذف</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}

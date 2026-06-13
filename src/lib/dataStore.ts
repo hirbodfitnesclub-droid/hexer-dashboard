@@ -303,7 +303,8 @@ class DataService {
   async getMarketingCampaignDetail(utmCampaign: string): Promise<CampaignDetail | null> {
     try {
       const data = await this.request('marketing_campaign_detail', { utm_campaign: utmCampaign });
-      return data as CampaignDetail | null;
+      if (!data) return null;
+      return sanitizeCampaignDetail(data);
     } catch (error: any) {
       console.error('Error fetching marketing campaign detail:', error);
       toast.error(error.message || 'خطا در دریافت جزئیات عملکرد کمپین');
@@ -323,6 +324,36 @@ class DataService {
       throw error;
     }
   }
+}
+
+// Client-side Sanitizer middleware for Campaign details
+export function sanitizeCampaignDetail(detail: any): CampaignDetail {
+  if (!detail) {
+    return {
+      utm_campaign: '',
+      channel: '',
+      visitors: 0,
+      registrations: 0,
+      buyers: 0,
+      conversion_rate: 0,
+      total_cost: 0,
+      cac: 0,
+      revenue: 0,
+      roi: 0,
+    };
+  }
+  return {
+    utm_campaign: detail.utm_campaign || '',
+    channel: detail.channel || '',
+    visitors: Number(detail.visitors ?? 0),
+    registrations: Number(detail.registrations ?? 0),
+    buyers: Number(detail.buyers ?? 0),
+    conversion_rate: Number(detail.conversion_rate ?? 0),
+    total_cost: Number(detail.total_cost ?? 0),
+    cac: Number(detail.cac ?? 0),
+    revenue: Number(detail.revenue ?? 0),
+    roi: Number(detail.roi ?? 0),
+  };
 }
 
 export const dataStore = new DataService();
