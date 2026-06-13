@@ -379,7 +379,7 @@ export const MarketingDashboard: React.FC = () => {
                         <div className="flex items-center space-x-2 space-x-reverse font-mono text-slate-400 pr-2">
                           <span>{row.user_count.toLocaleString('fa-IR')} کاربر</span>
                           <span className="text-slate-600">|</span>
-                          <span className="text-slate-300 font-bold">{percentage.toFixed(1)}٪</span>
+                          <span className="text-slate-300 font-bold">{(percentage || 0).toFixed(1)}٪</span>
                         </div>
                       </div>
                       <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
@@ -522,8 +522,8 @@ export const MarketingDashboard: React.FC = () => {
                 </div>
                 <div className="flex justify-between items-center text-xs border-t border-slate-800/40 pt-2">
                   <span className="text-slate-500 font-bold">میزان سود ناخالص:</span>
-                  <span className={`font-mono font-bold text-xs ${selectedCampaignDetail.roi >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {selectedCampaignDetail.roi >= 0 ? '+' : ''}{(selectedCampaignDetail.roi).toFixed(1)}٪
+                  <span className={`font-mono font-bold text-xs ${(selectedCampaignDetail.roi || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {(selectedCampaignDetail.roi || 0) >= 0 ? '+' : ''}{Number(selectedCampaignDetail.roi || 0).toFixed(1)}٪
                   </span>
                 </div>
               </div>
@@ -565,7 +565,7 @@ export const MarketingDashboard: React.FC = () => {
                 </div>
                 <div className="flex justify-between items-center text-xs border-t border-slate-800/40 pt-2">
                   <span className="text-slate-500 font-bold">نرخ کل تبدیل:</span>
-                  <span className="font-mono font-bold text-indigo-400">{(selectedCampaignDetail.conversion_rate).toFixed(2)}٪</span>
+                  <span className="font-mono font-bold text-indigo-400">{Number(selectedCampaignDetail.conversion_rate || 0).toFixed(2)}٪</span>
                 </div>
               </div>
             </div>

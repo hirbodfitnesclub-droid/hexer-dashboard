@@ -21,13 +21,14 @@ interface RevenueChartProps {
 export const RevenueChart: React.FC<RevenueChartProps> = ({ data }) => {
   // Safe default formatting for Tomans or Rials
   const formatYAxis = (value: number) => {
-    if (value >= 1000000) {
-      return `${(value / 1000000).toFixed(1)} م`;
+    const safeVal = value || 0;
+    if (safeVal >= 1000000) {
+      return `${(safeVal / 1000000).toFixed(1)} م`;
     }
-    if (value >= 1000) {
-      return `${(value / 1000).toFixed(0)} ک`;
+    if (safeVal >= 1000) {
+      return `${(safeVal / 1000).toFixed(0)} ک`;
     }
-    return value.toString();
+    return safeVal.toString();
   };
 
   const CustomTooltip = ({ active, payload }: any) => {
@@ -36,7 +37,7 @@ export const RevenueChart: React.FC<RevenueChartProps> = ({ data }) => {
         <div id="chart-tooltip" className="glass-panel p-3 rounded-xl border border-slate-700/60 shadow-lg text-xs leading-normal">
           <p id="tooltip-date" className="text-slate-400 font-medium mb-1">{payload[0].payload.date}</p>
           <p id="tooltip-val" className="text-emerald-400 font-bold font-mono">
-            {payload[0].value.toLocaleString('fa-IR')} تومان
+            {Number(payload[0].value || 0).toLocaleString('fa-IR')} تومان
           </p>
         </div>
       );

@@ -47,10 +47,10 @@ export const FunnelChart: React.FC<FunnelChartProps> = ({ data }) => {
         <div id="funnel-tooltip" className="glass-panel p-3 rounded-xl border border-slate-700/60 shadow-lg text-xs leading-normal">
           <p id="funnel-tooltip-stage" className="text-white font-bold mb-1">{row.stageLabel}</p>
           <p id="funnel-tooltip-count" className="text-slate-300">
-            تعداد: <span className="font-mono text-indigo-400 font-bold">{row.count.toLocaleString('fa-IR')}</span> کاربر
+            تعداد: <span className="font-mono text-indigo-400 font-bold">{(row.count || 0).toLocaleString('fa-IR')}</span> کاربر
           </p>
           <p id="funnel-tooltip-conversion" className="text-emerald-400 font-medium">
-            نرخ تبدیل مرحله: <span className="font-mono font-bold">{Number(row.conversion_percentage).toFixed(1)}٪</span>
+            نرخ تبدیل مرحله: <span className="font-mono font-bold">{Number(row.conversion_percentage || 0).toFixed(1)}٪</span>
           </p>
         </div>
       );

@@ -9,12 +9,12 @@ export const ChannelRoiTable: React.FC<ChannelRoiTableProps> = ({ data }) => {
   // Helper to format currency values to Persian numbers (Toman is / 10 from Rial)
   const formatToman = (val: number) => {
     // We assume the db returns IRR (Rials) for financial calculations, so we divide by 10 to display Toman
-    const tomanVal = Math.round(val / 10);
+    const tomanVal = Math.round((val || 0) / 10);
     return `${tomanVal.toLocaleString('fa-IR')} تومان`;
   };
 
   const formatPercent = (val: number) => {
-    return `${Number(val).toFixed(1)}٪`;
+    return `${Number(val || 0).toFixed(1)}٪`;
   };
 
   if (!data || data.length === 0) {
@@ -43,20 +43,20 @@ export const ChannelRoiTable: React.FC<ChannelRoiTableProps> = ({ data }) => {
         </thead>
         <tbody className="divide-y divide-slate-800/40">
           {data.map((row) => {
-            const isRoiPositive = row.roi >= 0;
+            const isRoiPositive = (row.roi || 0) >= 0;
             return (
               <tr key={row.channel} className="text-sm hover:bg-slate-800/15 transition-colors">
                 <td className="py-3.5 px-4 font-semibold text-slate-200">
                   {row.channel === 'direct' ? 'مستقیم (Direct)' : row.channel}
                 </td>
                 <td className="py-3.5 px-4 text-center font-mono text-slate-400">
-                  {row.visitors.toLocaleString('fa-IR')}
+                  {(row.visitors || 0).toLocaleString('fa-IR')}
                 </td>
                 <td className="py-3.5 px-4 text-center font-mono text-slate-400">
-                  {row.registrations.toLocaleString('fa-IR')}
+                  {(row.registrations || 0).toLocaleString('fa-IR')}
                 </td>
                 <td className="py-3.5 px-4 text-center font-mono text-slate-400">
-                  {row.buyers.toLocaleString('fa-IR')}
+                  {(row.buyers || 0).toLocaleString('fa-IR')}
                 </td>
                 <td className="py-3.5 px-4 text-center font-mono text-indigo-400 font-medium">
                   {formatPercent(row.conversion_rate)}
@@ -76,7 +76,7 @@ export const ChannelRoiTable: React.FC<ChannelRoiTableProps> = ({ data }) => {
                       ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
                       : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                   }`}>
-                    {isRoiPositive ? '+' : ''}{Number(row.roi).toFixed(1)}٪
+                    {isRoiPositive ? '+' : ''}{Number(row.roi || 0).toFixed(1)}٪
                   </span>
                 </td>
               </tr>
