@@ -17,13 +17,23 @@ import toast from 'react-hot-toast';
 
 const ADMIN_SECRET = '3128';
 
+// هاردکد شده با تأیید مالک پنل (تک‌کاربره): گیت‌وی سوپابیس برای Edge Function
+// با verify_jwt=true هدرهای apikey و Authorization را اجباری می‌کند.
+const SUPABASE_URL =
+  (import.meta as any).env.VITE_SUPABASE_URL || 'https://rvgiidesehuaqqncqilu.supabase.co';
+const SUPABASE_ANON_KEY =
+  (import.meta as any).env.VITE_SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Z2lpZGVzZWh1YXFxbmNxaWx1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNTc0NDQsImV4cCI6MjA5NTYzMzQ0NH0.Ko5juJCP76hDXMWIKsvv1AIQlyTztH0Zh0m1KN1gPSo';
+
 class DataService {
   private async request(action: string, payload: any = {}): Promise<any> {
-    const baseUrl = (import.meta as any).env.VITE_SUPABASE_URL || 'https://rvgiidesehuaqqncqilu.supabase.co';
+    const baseUrl = SUPABASE_URL;
     const response = await fetch(`${baseUrl}/functions/v1/admin-api`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
         'x-admin-secret': ADMIN_SECRET,
       },
       body: JSON.stringify({ action, ...payload }),
