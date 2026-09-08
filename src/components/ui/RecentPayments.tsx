@@ -2,6 +2,7 @@ import React from 'react';
 import { Payment } from '../../lib/supabase';
 import { Badge } from './Badge';
 import { DollarSign, Eye } from 'lucide-react';
+import { formatToman, formatFaDate } from '../../lib/format';
 
 interface RecentPaymentsProps {
   payments: Payment[];
@@ -46,7 +47,7 @@ export const RecentPayments: React.FC<RecentPaymentsProps> = ({
                   </div>
                 </td>
                 <td className="py-3.5 text-xs font-bold text-slate-100 font-mono">
-                  {(payment.amount / 10).toLocaleString('fa-IR')}
+                  {formatToman(payment.amount, false)}
                 </td>
                 <td className="py-3.5">
                   {payment.coupon_code ? (
@@ -63,7 +64,7 @@ export const RecentPayments: React.FC<RecentPaymentsProps> = ({
                   </Badge>
                 </td>
                 <td className="py-3.5 text-left text-xs text-slate-500 font-medium">
-                  {new Date(payment.created_at).toLocaleDateString('fa-IR')}
+                  {formatFaDate(payment.created_at)}
                 </td>
               </tr>
             ))

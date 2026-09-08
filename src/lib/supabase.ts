@@ -31,10 +31,13 @@ export interface Payment {
   id: string;
   user_id: string;
   amount: number;
-  status: 'success' | 'failed' | 'pending' | 'pending_manual';
+  status: 'success' | 'failed' | 'pending' | 'pending_manual' | 'paid' | string;
   coupon_code?: string | null;
   receipt_signed_url?: string | null;
   manual_decline_reason?: string | null;
+  paid_at?: string | null;
+  gateway?: string | null;
+  plan_code?: string | null;
   created_at: string;
   profiles?: Profile;
 }
@@ -56,12 +59,17 @@ export interface SupportTicket {
   subject: string;
   message: string;
   status: 'open' | 'pending' | 'resolved' | 'closed' | string;
+  admin_reply?: string | null;
+  replied_at?: string | null;
+  updated_at?: string | null;
   created_at: string;
   profiles: {
     id: string;
     display_name: string;
     avatar_url: string | null;
     created_at: string;
+    email?: string;
+    phone?: string;
   } | null;
   email: string;
 }
@@ -141,5 +149,27 @@ export interface CampaignDetail {
   cac: number;
   revenue: number;
   roi: number;
+}
+
+export type TicketStatus = 'open' | 'pending' | 'resolved' | 'closed';
+
+export type ManualPaymentStatus = 'pending_manual' | 'paid' | 'failed';
+
+export interface AuditLogRow {
+  id: string;
+  request_id: string | null;
+  admin_label: string | null;
+  action: string;
+  status: string;
+  target_id: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AppSettings {
+  id: number;
+  destination_card_number: string;
+  destination_card_owner: string;
+  updated_at?: string;
 }
 

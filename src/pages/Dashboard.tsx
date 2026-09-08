@@ -21,17 +21,23 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import toast from 'react-hot-toast';
+import { formatToman, faDayKey, faDayLabel } from '../lib/format';
+import { ErrorPanel } from '../components/ui/ErrorPanel';
 
 export const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [discounts, setDiscounts] = useState<DiscountCode[]>([]);
 
-  const loadAllData = async () => {
+  const loadAllData = async (soft = false) => {
     try {
-      setLoading(true);
+      if (soft) setIsRefreshing(true);
+      else setLoading(true);
+      setLoadError(null);
       const [p, s, pay, d] = await Promise.all([
         dataStore.getProfiles(),
         dataStore.getSubscriptions(),
@@ -43,18 +49,27 @@ export const Dashboard: React.FC = () => {
       setPayments(pay);
       setDiscounts(d);
     } catch (err: any) {
-      toast.error('خطا در دریافت اطلاعات داشبورد تحلیلی');
+      const msg = err.message || 'خطا در دریافت اطلاعات داشبورد تحلیلی';
+      setLoadError(msg);
+      if (!soft) toast.error(msg);
+      else toast.error(msg);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
   useEffect(() => {
     loadAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loading) {
     return <LoadingSpinner size="lg" message="در حال واکشی آخرین تحلیل‌های مالی و آماری..." />;
+  }
+
+  if (loadError && profiles.length === 0 && payments.length === 0) {
+    return <ErrorPanel id="dashboard-error-panel" message={loadError} onRetry={() => loadAllData()} />;
   }
 
   // Calculations
@@ -68,51 +83,57 @@ export const Dashboard: React.FC = () => {
 
   const activePromoCodes = discounts.filter(dis => dis.is_active).length;
 
-  // Modern Date/Time grouping with Intl API (toLocaleDateString)
-  // Revenue grouped by Persian date representation
+  // Revenue grouped by calendar day (key includes year + Tehran TZ so
+  // same month/day of different years never merge into one bucket)
   const successPayments = [...payments]
     .filter(pay => pay.status === 'success')
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  const revenueDateMap = new Map<string, number>();
+  const revenueByDay = new Map<string, { label: string; amount: number; time: number }>();
   successPayments.forEach(pay => {
-    const dateObj = new Date(pay.created_at);
-    const dateStr = dateObj.toLocaleDateString('fa-IR', {
-      month: 'long',
-      day: 'numeric'
+    const key = faDayKey(pay.created_at);
+    const prev = revenueByDay.get(key);
+    revenueByDay.set(key, {
+      label: faDayLabel(pay.created_at),
+      amount: (prev?.amount || 0) + pay.amount,
+      time: new Date(pay.created_at).getTime(),
     });
-    revenueDateMap.set(dateStr, (revenueDateMap.get(dateStr) || 0) + pay.amount);
   });
 
-  const revenueChartData = revenueDateMap.size > 0 
-    ? Array.from(revenueDateMap.entries()).map(([date, amount]) => ({ date, amount: amount / 10 }))
+  const revenueChartData = revenueByDay.size > 0 
+    ? Array.from(revenueByDay.values())
+        .sort((a, b) => a.time - b.time)
+        .map(({ label, amount }) => ({ date: label, amount: amount / 10 }))
     : [{ date: 'امروز', amount: 0 }];
 
-  // Cumulative User Growth grouped by signup date
+  // Cumulative User Growth grouped by signup day (year-aware key)
   const sortedProfiles = [...profiles]
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  const userDateMap = new Map<string, number>();
+  const userByDay = new Map<string, { label: string; count: number; time: number }>();
   let userCumulativeCount = 0;
   sortedProfiles.forEach(prof => {
     userCumulativeCount += 1;
-    const dateObj = new Date(prof.created_at);
-    const dateStr = dateObj.toLocaleDateString('fa-IR', {
-      month: 'long',
-      day: 'numeric'
+    const key = faDayKey(prof.created_at);
+    userByDay.set(key, {
+      label: faDayLabel(prof.created_at),
+      count: userCumulativeCount,
+      time: new Date(prof.created_at).getTime(),
     });
-    userDateMap.set(dateStr, userCumulativeCount);
   });
 
-  const userGrowthData = userDateMap.size > 0
-    ? Array.from(userDateMap.entries()).map(([date, count]) => ({ date, count }))
+  const userGrowthData = userByDay.size > 0
+    ? Array.from(userByDay.values())
+        .sort((a, b) => a.time - b.time)
+        .map(({ label, count }) => ({ date: label, count }))
     : [{ date: 'امروز', count: 0 }];
 
-  // Group plans distribution (using both plan_code and plan_id defensively)
+  // Plan distribution over ACTIVE subscriptions only (matches the subtitle)
+  const activeSubscriptions = subscriptions.filter(s => s.status === 'active');
   const planDistribution = Object.entries(PLAN_CONFIGS).map(([key, config]) => {
     return {
       name: key === 'free' ? 'پلن آزمایشی (رایگان)' : `پلن ${config.name}`,
-      value: subscriptions.filter(s => {
+      value: activeSubscriptions.filter(s => {
         const code = ((s as any).plan_code || s.plan_id || '').toLowerCase();
         if (key === 'free') {
           return code === 'free' || code === 'free-trial';
@@ -141,11 +162,11 @@ export const Dashboard: React.FC = () => {
     }).length;
 
     if (prev7Days === 0) {
-      return {
-        value: last7Days > 0 ? 100 : 0,
-        isPositive: true,
-        label: 'نسبت به هفته پیش'
-      };
+      // Honest edge cases: never fabricate a +100% trend.
+      if (last7Days === 0) {
+        return { value: 0, isPositive: true, label: 'بدون تغییر' };
+      }
+      return { value: 0, isPositive: true, label: 'داده جدید', valueText: 'جدید' };
     }
 
     const percentageChange = Math.round(((last7Days - prev7Days) / prev7Days) * 1000) / 10;
@@ -176,11 +197,10 @@ export const Dashboard: React.FC = () => {
       .reduce((sum, pay) => sum + pay.amount, 0);
 
     if (prev7DaysSum === 0) {
-      return {
-        value: last7DaysSum > 0 ? 100 : 0,
-        isPositive: true,
-        label: 'نسبت به هفته پیش'
-      };
+      if (last7DaysSum === 0) {
+        return { value: 0, isPositive: true, label: 'بدون تغییر' };
+      }
+      return { value: 0, isPositive: true, label: 'درآمد جدید', valueText: 'جدید' };
     }
 
     const percentageChange = Math.round(((last7DaysSum - prev7DaysSum) / prev7DaysSum) * 1000) / 10;
@@ -194,10 +214,12 @@ export const Dashboard: React.FC = () => {
   const usersTrend = calculateTrendForCount(profiles);
   const subsTrend = calculateTrendForCount(subscriptions.filter(s => s.status === 'active'));
   const revenueTrend = calculateTrendForRevenue(payments);
+  const expiredDiscounts = discounts.filter(d => !d.is_active || (d.expires_at && new Date(d.expires_at).getTime() < now.getTime())).length;
   const discountsTrend = {
-    value: discounts.filter(d => !d.is_active || (d.expires_at && new Date(d.expires_at).getTime() < now.getTime())).length,
+    value: 0,
     isPositive: false,
-    label: 'کدهای غیرفعال یا منقضی'
+    label: 'غیرفعال یا منقضی',
+    valueText: `${expiredDiscounts.toLocaleString('fa-IR')} کد`,
   };
 
   return (
@@ -222,10 +244,11 @@ export const Dashboard: React.FC = () => {
         <div id="quick-refresh-btn">
           <button
             id="dashboard-refresh-action"
-            onClick={loadAllData}
-            className="px-4 py-2 text-xs font-bold bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 hover:text-white rounded-xl transition-all flex items-center space-x-2 space-x-reverse cursor-pointer"
+            onClick={() => loadAllData(true)}
+            disabled={isRefreshing}
+            className="px-4 py-2 text-xs font-bold bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 hover:text-white rounded-xl transition-all flex items-center space-x-2 space-x-reverse cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <span>بروزرسانی زنده داده‌ها</span>
+            <span>{isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی زنده داده‌ها'}</span>
           </button>
         </div>
       </div>
@@ -251,7 +274,7 @@ export const Dashboard: React.FC = () => {
         <StatsCard
           id="stat-revenue"
           title="کل درآمد کسب شده"
-          value={`${(totalRevenue / 10).toLocaleString('fa-IR')} تومان`}
+          value={formatToman(totalRevenue)}
           icon={CircleDollarSign}
           trend={revenueTrend}
           iconColorClass="text-emerald-400 bg-emerald-500/10"
@@ -331,7 +354,7 @@ export const Dashboard: React.FC = () => {
               <p id="rpc-subcaption" className="text-[11px] text-slate-400 mt-1">شامل گزارش پرداخت موفق، ناموفق یا معلق ادمین</p>
             </div>
           </div>
-          <RecentPayments payments={payments.slice(0, 5)} />
+          <RecentPayments payments={[...payments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5)} />
         </Card>
       </div>
 

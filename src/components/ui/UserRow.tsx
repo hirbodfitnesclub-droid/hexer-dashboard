@@ -3,6 +3,7 @@ import { Profile } from '../../lib/supabase';
 import { UserAvatar } from './UserAvatar';
 import { Badge } from './Badge';
 import { ShieldCheck, ShieldAlert, Edit2 } from 'lucide-react';
+import { formatFaDate } from '../../lib/format';
 
 interface UserRowProps {
   profile: Profile;
@@ -37,7 +38,7 @@ export const UserRow: React.FC<UserRowProps> = ({
         </Badge>
       </td>
       <td className="py-4 text-xs font-medium text-slate-500">
-        {new Date(profile.created_at).toLocaleDateString('fa-IR')}
+        {formatFaDate(profile.created_at)}
       </td>
       <td className="py-4 pr-4">
         <div className="flex items-center justify-end gap-2">

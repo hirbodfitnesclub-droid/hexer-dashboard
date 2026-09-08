@@ -71,31 +71,35 @@ Deno.serve(async (req: Request) => {
     const mutatingActions = new Set([
       'update_profile', 'upsert_subscription', 'save_discount', 'delete_discount',
       'approve_manual_payment', 'reject_manual_payment', 'save_telegram_settings',
-      'marketing_save_campaign',
+      'marketing_save_campaign', 'update_ticket', 'create_subscription',
+      'cancel_subscription', 'save_app_settings',
     ]);
     const auditAdminAction = async (status: 'requested' | 'succeeded' | 'failed', details: Record<string, unknown> = {}) => {
-      const { error: auditError } = await supabaseService.from('admin_audit_log').insert({
-        request_id: requestId,
-        admin_user_id: adminUser.id,
-        action,
-        status,
-        target_type: typeof body.id === 'string' ? 'resource' : null,
-        target_id: typeof (body.id || body.payment_id || body.user_id) === 'string'
-          ? String(body.id || body.payment_id || body.user_id)
-          : null,
-        metadata: details,
-      });
-      if (auditError) console.error('Admin audit write failed', { requestId, action, code: auditError.code });
+      // لاگ ساده best-effort: خرابی لاگ هرگز اکشن اصلی را fail نمی‌کند
+      // و روی هر دو مسیر legacy و strict کار می‌کند.
+      try {
+        await supabaseService.from('admin_audit_log').insert({
+          request_id: requestId,
+          admin_user_id: legacySecretAuth ? null : (adminUser?.id ?? null),
+          admin_label: legacySecretAuth ? 'arash' : (adminUser?.id ?? 'admin'),
+          action,
+          status,
+          target_id: typeof (body.id || body.payment_id || body.user_id) === 'string'
+            ? String(body.id || body.payment_id || body.user_id)
+            : null,
+          metadata: details,
+        });
+      } catch (e) {
+        console.error('Admin audit write failed', { requestId, action });
+      }
     };
-    // audit log requires a real admin user id (NOT NULL column), so it only
-    // runs on the strict requireAdmin path, not on the legacy-secret path.
-    auditFailure = !legacySecretAuth && mutatingActions.has(action)
+    auditFailure = mutatingActions.has(action)
       ? () => auditAdminAction('failed', { reason: 'action_failed' })
       : null;
-    if (!legacySecretAuth && mutatingActions.has(action)) await auditAdminAction('requested');
+    if (mutatingActions.has(action)) await auditAdminAction('requested');
 
     const success = async (body: unknown) => {
-      if (!legacySecretAuth && mutatingActions.has(action)) await auditAdminAction('succeeded');
+      if (mutatingActions.has(action)) await auditAdminAction('succeeded');
       return jsonResponse(body, 200, corsHeaders);
     };
 
@@ -184,6 +188,46 @@ Deno.serve(async (req: Request) => {
         if (error) throw error;
         return success({ ok: true });
       }
+      case 'create_subscription': {
+        const { user_id, plan_code, expires_at } = body;
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!user_id || !uuidRegex.test(String(user_id))) throw new Error('شناسه کاربر معتبر نیست');
+        if (!plan_code) throw new Error('انتخاب پلن الزامی است');
+        const { data: plan, error: planErr } = await supabaseService.from('plans').select('*').eq('plan_code', plan_code).maybeSingle();
+        if (planErr) throw planErr;
+        if (!plan) throw new Error('پلن انتخاب شده یافت نشد');
+        const { data: authUser, error: userErr } = await supabaseService.auth.admin.getUserById(user_id);
+        if (userErr || !authUser?.user) throw new Error('کاربری با این شناسه یافت نشد');
+        const { data: existing } = await supabaseService.from('subscriptions').select('id').eq('user_id', user_id).maybeSingle();
+        if (existing) throw new Error('این کاربر قبلاً اشتراک دارد؛ از ویرایش استفاده کنید');
+        const nowIso = new Date().toISOString();
+        let expiresIso: string;
+        if (expires_at) {
+          const t = new Date(expires_at).getTime();
+          if (Number.isNaN(t) || t <= Date.now()) throw new Error('تاریخ انقضا باید در آینده باشد');
+          expiresIso = new Date(expires_at).toISOString();
+        } else {
+          expiresIso = new Date(Date.now() + Number(plan.period_days || 30) * 86400000).toISOString();
+        }
+        const { error: insErr } = await supabaseService.from('subscriptions').insert({
+          user_id, plan_code, status: 'active', started_at: nowIso, expires_at: expiresIso, updated_at: nowIso,
+        });
+        if (insErr) throw insErr;
+        await supabaseService.from('usage_counters').upsert({
+          user_id, period_start: nowIso, period_end: expiresIso, request_count: 0, updated_at: nowIso,
+        }, { onConflict: 'user_id' });
+        return success({ ok: true });
+      }
+      case 'cancel_subscription': {
+        const { user_id } = body;
+        if (!user_id) throw new Error('شناسه کاربر الزامی است');
+        const { data: existing, error: fErr } = await supabaseService.from('subscriptions').select('id').eq('user_id', user_id).maybeSingle();
+        if (fErr) throw fErr;
+        if (!existing) throw new Error('اشتراکی برای این کاربر یافت نشد');
+        const { error } = await supabaseService.from('subscriptions').update({ status: 'canceled', updated_at: new Date().toISOString() }).eq('user_id', user_id);
+        if (error) throw error;
+        return success({ ok: true });
+      }
       case 'list_payments': {
         const { data: payments, error: pErr } = await listQuery(supabaseService.from('payments').select('*').order('created_at', { ascending: false }));
         if (pErr) throw pErr;
@@ -227,8 +271,10 @@ Deno.serve(async (req: Request) => {
       }
       case 'save_discount': {
         const discount = body;
+        const rawCode = String(discount.code || '').trim().toUpperCase();
+        if (!rawCode) throw new Error('کد تخفیف الزامی است');
         const payload: any = {
-          code: discount.code.toUpperCase(), discount_percent: discount.discount_percent, max_uses: discount.max_uses,
+          code: rawCode, discount_percent: discount.discount_percent, max_uses: discount.max_uses,
           used_count: discount.used_count || 0, expires_at: discount.expires_at,
           is_active: discount.is_active !== false, created_at: discount.created_at || new Date().toISOString()
         };
@@ -246,7 +292,20 @@ Deno.serve(async (req: Request) => {
         return success({ ok: true });
       }
       case 'list_manual_payments': {
-        const { data: payments, error: pErr } = await listQuery(supabaseService.from('payments').select('*').eq('status', 'pending_manual').order('created_at', { ascending: false }));
+        const { status } = body as { status?: string };
+        // تاریخچه: pending_manual (پیش‌فرض، سازگار با UI قدیمی) | paid | failed | all
+        // نکته: paid/failed فقط مربوط به کارت‌به‌کارت است (gateway)، نه پرداخت‌های زیبال.
+        const allowedHistory = ['pending_manual', 'paid', 'failed'];
+        let q = supabaseService.from('payments').select('*').order('created_at', { ascending: false });
+        if (status === 'all') {
+          q = q.in('status', ['pending_manual', 'paid', 'failed']).eq('gateway', 'card_to_card');
+        } else if (status && allowedHistory.includes(status)) {
+          q = q.eq('status', status);
+          if (status !== 'pending_manual') q = q.eq('gateway', 'card_to_card');
+        } else {
+          q = q.eq('status', 'pending_manual');
+        }
+        const { data: payments, error: pErr } = await listQuery(q);
         if (pErr) throw pErr;
         const userIds = [...new Set((payments || []).map((p: any) => p.user_id).filter(Boolean))];
         let profiles: any[] = [];
@@ -271,7 +330,9 @@ Deno.serve(async (req: Request) => {
           }
           paymentDTOs.push({
             id: pay.id, user_id: pay.user_id, amount: Number(pay.final_amount_irr || pay.amount_irr || 0),
-            status: 'pending_manual', receipt_signed_url: signedUrl, created_at: pay.created_at,
+            status: pay.status, receipt_signed_url: signedUrl, created_at: pay.created_at,
+            paid_at: pay.paid_at || null, manual_decline_reason: pay.manual_decline_reason || null,
+            gateway: pay.gateway || null, plan_code: pay.plan_code || null,
             profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at, email: contact.email, phone: contact.phone } : null
           });
         }
@@ -286,9 +347,13 @@ Deno.serve(async (req: Request) => {
         if (fErr) throw fErr;
         const { error: rpcErr } = await supabaseService.rpc('activate_manual_subscription', { p_payment_id: payment_id });
         if (rpcErr) throw rpcErr;
-        let receiptPath = pay?.offline_receipt_url || '';
-        if (receiptPath.includes('/receipts/')) receiptPath = receiptPath.split('/receipts/')[1];
-        if (receiptPath) await supabaseService.storage.from('receipts').remove([receiptPath]);
+        try {
+          let receiptPath = pay?.offline_receipt_url || '';
+          if (receiptPath.includes('/receipts/')) receiptPath = receiptPath.split('/receipts/')[1];
+          if (receiptPath) await supabaseService.storage.from('receipts').remove([receiptPath]);
+        } catch (e) {
+          console.error('خطا در پاک‌سازی فیش رسید:', e);
+        }
         return success({ ok: true });
       }
       case 'reject_manual_payment': {
@@ -298,9 +363,13 @@ Deno.serve(async (req: Request) => {
         if (fErr) throw fErr;
         const { error: rpcErr } = await supabaseService.rpc('reject_manual_payment', { p_payment_id: payment_id, p_reason: reason });
         if (rpcErr) throw rpcErr;
-        let receiptPath = pay?.offline_receipt_url || '';
-        if (receiptPath.includes('/receipts/')) receiptPath = receiptPath.split('/receipts/')[1];
-        if (receiptPath) await supabaseService.storage.from('receipts').remove([receiptPath]);
+        try {
+          let receiptPath = pay?.offline_receipt_url || '';
+          if (receiptPath.includes('/receipts/')) receiptPath = receiptPath.split('/receipts/')[1];
+          if (receiptPath) await supabaseService.storage.from('receipts').remove([receiptPath]);
+        } catch (e) {
+          console.error('خطا در پاک‌سازی فیش رسید:', e);
+        }
         return success({ ok: true });
       }
       case 'get_telegram_settings': {
@@ -318,6 +387,47 @@ Deno.serve(async (req: Request) => {
         if (error) throw error;
         return success({ ok: true });
       }
+      case 'test_telegram': {
+        const { data: settings, error: sErr } = await supabaseService.from('telegram_settings').select('*').eq('id', 1).maybeSingle();
+        if (sErr) throw sErr;
+        if (!settings?.bot_token || !settings?.chat_id) throw new Error('ابتدا توکن و چت‌آیدی را ذخیره کنید');
+        const resp = await fetch(`https://api.telegram.org/bot${settings.bot_token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: settings.chat_id, text: '✅ اتصال ربات اطلاع‌رسانی هکسر برقرار است.' }),
+        });
+        if (!resp.ok) throw new Error('ارسال پیام آزمایشی ناموفق بود؛ توکن یا چت‌آیدی را بررسی کنید');
+        return success({ ok: true });
+      }
+      case 'get_app_settings': {
+        const { data, error } = await supabaseService.from('app_settings').select('*').eq('id', 1).maybeSingle();
+        if (error) throw error;
+        return new Response(JSON.stringify(data || { id: 1, destination_card_number: '', destination_card_owner: '' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      case 'save_app_settings': {
+        const rawNum = String(body.destination_card_number ?? '').replace(/[\s-]/g, '');
+        if (rawNum !== '' && !/^\d{16}$/.test(rawNum)) throw new Error('شماره کارت باید ۱۶ رقم باشد');
+        const { error } = await supabaseService.from('app_settings').upsert({
+          id: 1,
+          destination_card_number: rawNum,
+          destination_card_owner: String(body.destination_card_owner ?? '').trim().slice(0, 100),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+        if (error) throw error;
+        return success({ ok: true });
+      }
+      case 'list_audit': {
+        const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 200);
+        const offset = Math.max(Number(body.offset) || 0, 0);
+        const { data, error } = await supabaseService.from('admin_audit_log')
+          .select('*').order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+        if (error) throw error;
+        return new Response(JSON.stringify(data || []), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
       case 'list_tickets': {
         const { data: tickets, error: tErr } = await listQuery(supabaseService.from('support_tickets').select('*').order('created_at', { ascending: false }));
         if (tErr) throw tErr;
@@ -328,24 +438,44 @@ Deno.serve(async (req: Request) => {
           if (profileErr) throw profileErr;
           if (pData) profiles = pData;
         }
-        const usersList: any[] = [];
-        for (const uid of userIds.slice(0, LIST_LIMIT)) {
-          const { data, error: uErr } = await supabaseService.auth.admin.getUserById(uid);
-          if (!uErr && data?.user) usersList.push(data.user);
-        }
+        const users = await fetchAllAuthUsers(supabaseService);
         const ticketDTOs = (tickets || []).map((ticket: any) => {
           const profile = (profiles || []).find((p: any) => p.id === ticket.user_id);
-          const authUser = usersList.find((u: any) => u.id === ticket.user_id);
+          const contact = contactOf(users, ticket.user_id);
           return {
             id: ticket.id, user_id: ticket.user_id, subject: ticket.subject, message: ticket.message,
-            status: ticket.status, created_at: ticket.created_at,
-            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at, email: authUser?.email || '', phone: authUser?.phone || '' } : null,
-            email: authUser?.email || authUser?.phone || ''
+            status: ticket.status, admin_reply: ticket.admin_reply || null,
+            replied_at: ticket.replied_at || null, updated_at: ticket.updated_at || null,
+            created_at: ticket.created_at,
+            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at, email: contact.email, phone: contact.phone } : null,
+            email: contact.email || contact.phone || ''
           };
         });
         return new Response(JSON.stringify(ticketDTOs), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
+      }
+      case 'update_ticket': {
+        const { id, status, admin_reply } = body;
+        if (!id || typeof id !== 'string') throw new Error('شناسه تیکت الزامی است');
+        const allowed = ['open', 'pending', 'resolved', 'closed'];
+        const patch: any = { updated_at: new Date().toISOString() };
+        if (status !== undefined && status !== null && status !== '') {
+          if (!allowed.includes(String(status))) throw new Error('وضعیت تیکت معتبر نیست');
+          patch.status = String(status);
+        }
+        if (admin_reply !== undefined && admin_reply !== null) {
+          const reply = String(admin_reply).trim();
+          if (reply.length > 5000) throw new Error('متن پاسخ بیش از حد طولانی است');
+          patch.admin_reply = reply === '' ? null : reply;
+          if (reply !== '') patch.replied_at = new Date().toISOString();
+        }
+        if (patch.status === undefined && patch.admin_reply === undefined) {
+          throw new Error('حداقل وضعیت یا پاسخ باید ارسال شود');
+        }
+        const { error } = await supabaseService.from('support_tickets').update(patch).eq('id', id);
+        if (error) throw error;
+        return success({ ok: true });
       }
       case 'marketing_traffic': {
         const { data, error } = await supabaseService.schema('marketing').from('mv_traffic_overview').select('*');

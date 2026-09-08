@@ -11,6 +11,8 @@ interface StatsCardProps {
     value: number;
     isPositive: boolean;
     label: string;
+    /** اگر داده شود، به‌جای «٪+X» همین متن خنثی نمایش داده می‌شود (برای مقادیر غیر درصدی یا بدون مبنا) */
+    valueText?: string;
   };
   iconColorClass?: string;
 }
@@ -42,14 +44,22 @@ export const StatsCard: React.FC<StatsCardProps> = ({
           </span>
           {trend && (
             <div id={`${id}-trend`} className="flex items-center mt-2 space-x-1 space-x-reverse text-xs">
-              {trend.isPositive ? (
-                <TrendingUp id={`${id}-trend-up`} className="w-3.5 h-3.5 text-emerald-400" />
+              {trend.valueText ? (
+                <span id={`${id}-trend-val`} className="text-slate-400 font-medium">
+                  {trend.valueText}
+                </span>
               ) : (
-                <TrendingDown id={`${id}-trend-down`} className="w-3.5 h-3.5 text-rose-400" />
+                <>
+                  {trend.isPositive ? (
+                    <TrendingUp id={`${id}-trend-up`} className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <TrendingDown id={`${id}-trend-down`} className="w-3.5 h-3.5 text-rose-400" />
+                  )}
+                  <span id={`${id}-trend-val`} className={trend.isPositive ? 'text-emerald-400 font-medium' : 'text-rose-400 font-medium'}>
+                    {trend.isPositive ? '+' : ''}{trend.value}%
+                  </span>
+                </>
               )}
-              <span id={`${id}-trend-val`} className={trend.isPositive ? 'text-emerald-400 font-medium' : 'text-rose-400 font-medium'}>
-                {trend.isPositive ? '+' : ''}{trend.value}%
-              </span>
               <span id={`${id}-trend-lbl`} className="text-slate-500">{trend.label}</span>
             </div>
           )}

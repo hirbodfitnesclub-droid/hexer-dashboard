@@ -2,6 +2,7 @@ import React from 'react';
 import { DiscountCode } from '../../lib/supabase';
 import { Badge } from './Badge';
 import { Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { formatFaDate } from '../../lib/format';
 
 interface DiscountRowProps {
   discount: DiscountCode;
@@ -43,7 +44,7 @@ export const DiscountRow: React.FC<DiscountRowProps> = ({
       <td className="py-4 text-right text-xs font-medium text-slate-400">
         {discount.expires_at ? (
           <span className="font-mono">
-            {new Date(discount.expires_at).toLocaleDateString('fa-IR')}
+            {formatFaDate(discount.expires_at)}
           </span>
         ) : (
           <span className="text-slate-600 h-full">نامحدود (دائمی)</span>

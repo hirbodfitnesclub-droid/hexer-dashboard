@@ -5,6 +5,10 @@ import {
   DiscountCode,
   Plan,
   SupportTicket,
+  TicketStatus,
+  ManualPaymentStatus,
+  AuditLogRow,
+  AppSettings,
   TrafficOverview,
   FunnelStageRow,
   PurchaseTimingRow,
@@ -130,10 +134,10 @@ class DataService {
     }
   }
 
-  // Fetch pending manual card-to-card payments
-  async getManualPayments(): Promise<Payment[]> {
+  // Fetch pending manual card-to-card payments (or history by status)
+  async getManualPayments(status: ManualPaymentStatus | 'all' = 'pending_manual'): Promise<Payment[]> {
     try {
-      const data = await this.request('list_manual_payments');
+      const data = await this.request('list_manual_payments', { status });
       return (data || []) as Payment[];
     } catch (error) {
       console.error('Error fetching manual payments:', error);
@@ -233,6 +237,92 @@ class DataService {
       return (data || []) as SupportTicket[];
     } catch (error) {
       console.error('Error fetching support tickets:', error);
+      throw error;
+    }
+  }
+
+  // Reply to / change status of a support ticket
+  async updateTicket(ticketId: string, patch: { status?: TicketStatus; admin_reply?: string }): Promise<boolean> {
+    try {
+      await this.request('update_ticket', { id: ticketId, ...patch });
+      toast.success('پاسخ و وضعیت تیکت با موفقیت ثبت شد.');
+      return true;
+    } catch (error: any) {
+      console.error('Error updating ticket:', error);
+      toast.error(error.message || 'خطا در ثبت پاسخ تیکت');
+      throw error;
+    }
+  }
+
+  // Create a subscription for an existing user (no new auth user)
+  async createSubscription(payload: { user_id: string; plan_code: string; expires_at?: string | null }): Promise<boolean> {
+    try {
+      await this.request('create_subscription', payload);
+      toast.success('اشتراک جدید با موفقیت ساخته شد.');
+      return true;
+    } catch (error: any) {
+      console.error('Error creating subscription:', error);
+      toast.error(error.message || 'خطا در ساخت اشتراک');
+      throw error;
+    }
+  }
+
+  // Cancel a user's subscription
+  async cancelSubscription(userId: string): Promise<boolean> {
+    try {
+      await this.request('cancel_subscription', { user_id: userId });
+      toast.success('اشتراک کاربر لغو شد.');
+      return true;
+    } catch (error: any) {
+      console.error('Error canceling subscription:', error);
+      toast.error(error.message || 'خطا در لغو اشتراک');
+      throw error;
+    }
+  }
+
+  // App settings (destination card)
+  async getAppSettings(): Promise<AppSettings | null> {
+    try {
+      const data = await this.request('get_app_settings');
+      return data as AppSettings;
+    } catch (error) {
+      console.error('Error fetching app settings:', error);
+      return null;
+    }
+  }
+
+  async saveAppSettings(payload: { destination_card_number: string; destination_card_owner: string }): Promise<boolean> {
+    try {
+      await this.request('save_app_settings', payload);
+      toast.success('تنظیمات با موفقیت ذخیره شد.');
+      return true;
+    } catch (error: any) {
+      console.error('Error saving app settings:', error);
+      toast.error(error.message || 'خطا در ذخیره تنظیمات');
+      throw error;
+    }
+  }
+
+  // Send a test Telegram message with saved settings
+  async testTelegram(): Promise<boolean> {
+    try {
+      await this.request('test_telegram');
+      toast.success('پیام آزمایشی تلگرام ارسال شد.');
+      return true;
+    } catch (error: any) {
+      console.error('Error testing telegram:', error);
+      toast.error(error.message || 'ارسال پیام آزمایشی ناموفق بود');
+      throw error;
+    }
+  }
+
+  // Simple admin audit log
+  async getAuditLogs(limit = 50, offset = 0): Promise<AuditLogRow[]> {
+    try {
+      const data = await this.request('list_audit', { limit, offset });
+      return (data || []) as AuditLogRow[];
+    } catch (error: any) {
+      console.error('Error fetching audit logs:', error);
       throw error;
     }
   }

@@ -14,6 +14,8 @@ import { DiscountsManager } from './pages/DiscountsManager';
 import { ManualPaymentsManager } from './pages/ManualPaymentsManager';
 import { TicketsManager } from './pages/TicketsManager';
 import { MarketingDashboard } from './pages/MarketingDashboard';
+import { SettingsPage } from './pages/SettingsPage';
+import { LogsPage } from './pages/LogsPage';
 import { Toaster } from 'react-hot-toast';
 
 export default function App() {
@@ -61,6 +63,8 @@ export default function App() {
           {activeTab === 'discounts' && <DiscountsManager />}
           {activeTab === 'tickets' && <TicketsManager />}
           {activeTab === 'marketing' && <MarketingDashboard />}
+          {activeTab === 'settings' && <SettingsPage />}
+          {activeTab === 'logs' && <LogsPage />}
         </AdminLayout>
       )}
     </div>

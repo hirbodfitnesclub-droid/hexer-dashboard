@@ -1,19 +1,32 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Profile } from '../lib/supabase';
 import { dataStore } from '../lib/dataStore';
 import { Card } from '../components/ui/Card';
 import { UserRow } from '../components/ui/UserRow';
 import { UserBlockModal } from '../components/ui/UserBlockModal';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
+import { ErrorPanel } from '../components/ui/ErrorPanel';
+import { Pagination } from '../components/ui/Pagination';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Users, Search, Filter, ShieldAlert } from 'lucide-react';
+import { Users, Search, Download } from 'lucide-react';
 import { motion } from 'motion/react';
 import toast from 'react-hot-toast';
+import { useDebouncedValue } from '../lib/useDebouncedValue';
+import { exportToCsv } from '../lib/csv';
+import { formatFaDate } from '../lib/format';
 
 export const UsersManager: React.FC = () => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(searchQuery, 350);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [blockTarget, setBlockTarget] = useState<Profile | null>(null);
+  const [isActing, setIsActing] = useState(false);
   
   // Modal controllers
   const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
@@ -22,13 +35,16 @@ export const UsersManager: React.FC = () => {
   // Filter option
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'blocked'>('all');
 
-  const fetchUsersList = async () => {
+  const fetchUsersList = async (soft = false) => {
     try {
-      setLoading(true);
+      if (!soft) setLoading(true);
+      setLoadError(null);
       const list = await dataStore.getProfiles();
       setProfiles(list);
-    } catch (e) {
-      toast.error('خطا در دریافت لیست کاربران پلتفرم');
+    } catch (e: any) {
+      const msg = e.message || 'خطا در دریافت لیست کاربران پلتفرم';
+      setLoadError(msg);
+      if (!soft) toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -36,7 +52,12 @@ export const UsersManager: React.FC = () => {
 
   useEffect(() => {
     fetchUsersList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQuery, activeFilter]);
 
   const handleEditClick = (profile: Profile) => {
     setSelectedProfile(profile);
@@ -49,43 +70,73 @@ export const UsersManager: React.FC = () => {
       setIsEditModalOpen(false);
       setSelectedProfile(null);
       // Re-fetch to reflect change
-      fetchUsersList();
+      fetchUsersList(true);
     } else {
       toast.error('ثبت اطلاعات با خطا مواجه شد.');
     }
   };
 
-  const handleToggleBlock = async (profile: Profile) => {
-    const nextState = !profile.is_blocked;
-    const desc = nextState ? 'مسدود شدن' : 'فعال‌سازی دسترسی';
-    
-    const updated: Profile = {
-      ...profile,
-      is_blocked: nextState
-    };
+  const handleToggleBlock = (profile: Profile) => {
+    // Require explicit confirmation: one click must never block a user.
+    setBlockTarget(profile);
+  };
 
-    const success = await dataStore.updateProfile(updated);
-    if (success) {
-      toast.success(`دسترسی کاربر به ${nextState ? 'مسدود' : 'آزاد'} تغییر یافت.`);
-      fetchUsersList();
+  const handleConfirmBlock = async () => {
+    if (!blockTarget || isActing) return;
+    const nextState = !blockTarget.is_blocked;
+    try {
+      setIsActing(true);
+      const updated: Profile = { ...blockTarget, is_blocked: nextState };
+      const success = await dataStore.updateProfile(updated);
+      if (success) {
+        toast.success(`دسترسی کاربر ${nextState ? 'مسدود' : 'آزاد'} شد.`);
+        setBlockTarget(null);
+        fetchUsersList(true);
+      }
+    } catch {
+      // toast handled in dataStore
+    } finally {
+      setIsActing(false);
     }
   };
 
-  // Search filter computes
-  const filteredProfiles = profiles.filter(profile => {
-    const nameMatch = (profile.display_name || '').toLowerCase().includes(searchQuery.toLowerCase());
-    const emailMatch = (profile.email || '').toLowerCase().includes(searchQuery.toLowerCase());
-    const phoneMatch = (profile.phone || '').toLowerCase().includes(searchQuery.toLowerCase());
-    const idMatch = (profile.id || '').toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesSearch = nameMatch || emailMatch || phoneMatch || idMatch;
+  // Search filter computes (debounced)
+  const filteredProfiles = useMemo(() => {
+    const q = debouncedQuery.toLowerCase().trim();
+    return profiles.filter(profile => {
+      const matchesSearch = !q ? true : (
+        (profile.display_name || '').toLowerCase().includes(q) ||
+        (profile.email || '').toLowerCase().includes(q) ||
+        (profile.phone || '').toLowerCase().includes(q) ||
+        (profile.id || '').toLowerCase().includes(q)
+      );
 
-    if (activeFilter === 'all') return matchesSearch;
-    if (activeFilter === 'blocked') return matchesSearch && profile.is_blocked;
-    if (activeFilter === 'active') return matchesSearch && !profile.is_blocked;
+      if (activeFilter === 'all') return matchesSearch;
+      if (activeFilter === 'blocked') return matchesSearch && profile.is_blocked;
+      if (activeFilter === 'active') return matchesSearch && !profile.is_blocked;
 
-    return matchesSearch;
-  });
+      return matchesSearch;
+    });
+  }, [profiles, debouncedQuery, activeFilter]);
+
+  const totalPages = Math.max(Math.ceil(filteredProfiles.length / pageSize), 1);
+  const safePage = Math.min(page, totalPages);
+  const pagedProfiles = filteredProfiles.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  const handleExportCsv = () => {
+    exportToCsv(
+      `users-${new Date().toISOString().slice(0, 10)}`,
+      ['نام', 'ایمیل', 'موبایل', 'وضعیت', 'تاریخ عضویت'],
+      filteredProfiles.map((p) => [
+        p.display_name || '',
+        p.email || '',
+        p.phone || '',
+        p.is_blocked ? 'مسدود' : 'فعال',
+        formatFaDate(p.created_at),
+      ]),
+    );
+    toast.success('فایل CSV کاربران دانلود شد.');
+  };
 
   return (
     <motion.div
@@ -107,10 +158,17 @@ export const UsersManager: React.FC = () => {
           </p>
         </div>
 
-        {/* Counter quick tag */}
-        <div id="users-active-stat" className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 p-1.5 rounded-xl text-xs font-semibold">
-          <span className="text-slate-400">تعداد کاربران بارگذاری شده:</span>
-          <span className="font-mono text-brand-400 text-sm font-bold">{filteredProfiles.length}</span>
+        {/* Counter quick tag + export */}
+        <div id="users-active-stat" className="flex items-center gap-2">
+          <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 p-1.5 rounded-xl text-xs font-semibold">
+            <span className="text-slate-400">نمایش:</span>
+            <span className="font-mono text-brand-400 text-sm font-bold">{filteredProfiles.length}</span>
+            <span className="text-slate-500">از</span>
+            <span className="font-mono text-slate-300 text-sm font-bold">{profiles.length}</span>
+          </div>
+          <Button id="users-export-btn" variant="secondary" size="sm" onClick={handleExportCsv} icon={<Download className="w-3.5 h-3.5" />}>
+            CSV
+          </Button>
         </div>
       </div>
 
@@ -175,6 +233,8 @@ export const UsersManager: React.FC = () => {
       <Card id="users-list-card" hoverable={false}>
         {loading ? (
           <LoadingSpinner size="md" message="بارگذاری دقیق لیست پروفایل‌های سیستمی..." />
+        ) : loadError ? (
+          <ErrorPanel id="users-error-panel" message={loadError} onRetry={() => fetchUsersList()} />
         ) : (
           <div id="table-scroll-wrap" className="overflow-x-auto w-full">
             <table id="users-data-table" className="w-full text-right border-collapse">
@@ -188,14 +248,14 @@ export const UsersManager: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/40">
-                {filteredProfiles.length === 0 ? (
+                {pagedProfiles.length === 0 ? (
                   <tr id="users-empty-row">
                     <td colSpan={5} className="py-12 text-center text-slate-500 text-xs font-medium">
                       هیچ کاربری با شرایط جستجو شده یافت نشد.
                     </td>
                   </tr>
                 ) : (
-                  filteredProfiles.map(profile => (
+                  pagedProfiles.map(profile => (
                     <UserRow
                       key={profile.id}
                       profile={profile}
@@ -206,9 +266,35 @@ export const UsersManager: React.FC = () => {
                 )}
               </tbody>
             </table>
+            <Pagination
+              id="users-pagination"
+              page={safePage}
+              totalPages={totalPages}
+              totalItems={filteredProfiles.length}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+            />
           </div>
         )}
       </Card>
+
+      {/* Block/unblock confirmation */}
+      <ConfirmModal
+        id="user-block-confirm"
+        isOpen={blockTarget !== null}
+        onClose={() => setBlockTarget(null)}
+        onConfirm={handleConfirmBlock}
+        title={blockTarget?.is_blocked ? 'رفع مسدودیت کاربر' : 'مسدود کردن کاربر'}
+        message={
+          blockTarget?.is_blocked
+            ? `دسترسی «${blockTarget?.display_name || 'کاربر'}» دوباره آزاد شود؟`
+            : `«${blockTarget?.display_name || 'کاربر'}» مسدود شود؟ کاربر بلافاصله از سرویس محروم می‌شود.`
+        }
+        confirmLabel={blockTarget?.is_blocked ? 'آزاد کردن' : 'مسدود کردن'}
+        variant={blockTarget?.is_blocked ? 'primary' : 'danger'}
+        isLoading={isActing}
+      />
 
       {/* Custom Block / info modifier modal */}
       <UserBlockModal

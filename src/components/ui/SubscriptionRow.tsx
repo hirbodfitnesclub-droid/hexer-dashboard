@@ -2,17 +2,20 @@ import React from 'react';
 import { Subscription } from '../../lib/supabase';
 import { Badge } from './Badge';
 import { UserAvatar } from './UserAvatar';
-import { Edit } from 'lucide-react';
+import { Edit, Ban } from 'lucide-react';
 import { PLAN_CONFIGS } from '../../lib/constants';
+import { formatToman, formatFaDate } from '../../lib/format';
 
 interface SubscriptionRowProps {
   subscription: Subscription;
   onEdit: (subscription: Subscription) => void;
+  onCancel?: (subscription: Subscription) => void;
 }
 
 export const SubscriptionRow: React.FC<SubscriptionRowProps> = ({
   subscription,
   onEdit,
+  onCancel,
 }) => {
   const getStatusBadge = (status: 'active' | 'expired' | 'canceled') => {
     switch (status) {
@@ -62,19 +65,19 @@ export const SubscriptionRow: React.FC<SubscriptionRowProps> = ({
         {getStatusBadge(subscription.status)}
       </td>
       <td className="py-4 text-right text-xs text-slate-400 font-mono font-bold">
-        {subscription.plans?.price ? `${(subscription.plans.price / 10).toLocaleString('fa-IR')} تومان` : '۰ تومان'}
+        {subscription.plans?.price ? formatToman(subscription.plans.price) : '۰ تومان'}
       </td>
       <td className="py-4 text-right text-xs font-semibold text-slate-400">
         {subscription.expires_at ? (
           <span className="font-mono text-slate-300">
-            {new Date(subscription.expires_at).toLocaleDateString('fa-IR')}
+            {formatFaDate(subscription.expires_at)}
           </span>
         ) : (
           <span className="text-slate-600 font-black">بدون انقضا (دائم)</span>
         )}
       </td>
       <td className="py-4 pr-4">
-        <div className="flex items-center justify-end">
+        <div className="flex items-center justify-end gap-1.5">
           <button
             id={`btn-edit-sub-${subscription.id}`}
             onClick={() => onEdit(subscription)}
@@ -83,6 +86,16 @@ export const SubscriptionRow: React.FC<SubscriptionRowProps> = ({
           >
             <Edit className="w-3.5 h-3.5 pointer-events-none" />
           </button>
+          {onCancel && subscription.status === 'active' && (
+            <button
+              id={`btn-cancel-sub-${subscription.id}`}
+              onClick={() => onCancel(subscription)}
+              className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white transition-all cursor-pointer"
+              title="لغو اشتراک"
+            >
+              <Ban className="w-3.5 h-3.5 pointer-events-none" />
+            </button>
+          )}
         </div>
       </td>
     </tr>

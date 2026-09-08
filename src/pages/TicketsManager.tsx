@@ -1,17 +1,20 @@
-import React, { useEffect, useState } from 'react';
-import { SupportTicket } from '../lib/supabase';
+import React, { useEffect, useMemo, useState } from 'react';
+import { SupportTicket, TicketStatus } from '../lib/supabase';
 import { dataStore } from '../lib/dataStore';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { ModalWrapper } from '../components/ui/ModalWrapper';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
+import { ErrorPanel } from '../components/ui/ErrorPanel';
+import { Pagination } from '../components/ui/Pagination';
 import { Input } from '../components/ui/Input';
+import { useDebouncedValue } from '../lib/useDebouncedValue';
+import { exportToCsv } from '../lib/csv';
+import { formatFaDate, formatFaDateTime } from '../lib/format';
 import { 
   MessageSquare, 
   Search, 
-  Filter, 
-  Mail, 
   User as UserIcon, 
   Clock, 
   AlertCircle, 
@@ -20,6 +23,8 @@ import {
   Copy, 
   Check, 
   RefreshCw,
+  Download,
+  Send,
   HelpCircle
 } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -28,18 +33,28 @@ import toast from 'react-hot-toast';
 export const TicketsManager: React.FC = () => {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(searchQuery, 350);
   const [activeFilter, setActiveFilter] = useState<'all' | 'open' | 'pending' | 'resolved' | 'closed'>('all');
   const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
   const [copiedEmail, setCopiedEmail] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const [replyStatus, setReplyStatus] = useState<TicketStatus>('pending');
+  const [isSaving, setIsSaving] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
 
-  const fetchTicketsList = async () => {
+  const fetchTicketsList = async (soft = false) => {
     try {
-      setLoading(true);
+      if (!soft) setLoading(true);
+      setLoadError(null);
       const list = await dataStore.getTickets();
       setTickets(list);
     } catch (e: any) {
-      toast.error(e.message || 'خطا در دریافت لیست تیکت‌های پشتیبانی');
+      const msg = e.message || 'خطا در دریافت لیست تیکت‌های پشتیبانی';
+      setLoadError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -48,6 +63,44 @@ export const TicketsManager: React.FC = () => {
   useEffect(() => {
     fetchTicketsList();
   }, []);
+
+  // Reset page when filter/search changes
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQuery, activeFilter]);
+
+  // Prefill reply form when a ticket is opened
+  useEffect(() => {
+    if (selectedTicket) {
+      setReplyText(selectedTicket.admin_reply || '');
+      const s = (selectedTicket.status || 'open').toLowerCase();
+      setReplyStatus((['open', 'pending', 'resolved', 'closed'] as TicketStatus[]).includes(s as TicketStatus) ? (s as TicketStatus) : 'pending');
+      setCopiedEmail(false);
+    }
+  }, [selectedTicket]);
+
+  const handleSaveReply = async () => {
+    if (!selectedTicket || isSaving) return;
+    const trimmed = replyText.trim();
+    const statusChanged = replyStatus !== selectedTicket.status;
+    if (!trimmed && !statusChanged) {
+      toast.error('حداقل یک پاسخ بنویسید یا وضعیت را تغییر دهید.');
+      return;
+    }
+    try {
+      setIsSaving(true);
+      await dataStore.updateTicket(selectedTicket.id, {
+        status: statusChanged ? replyStatus : undefined,
+        admin_reply: trimmed ? trimmed : undefined,
+      });
+      setSelectedTicket(null);
+      await fetchTicketsList(true);
+    } catch {
+      // toast handled in dataStore
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleCopyEmail = (email: string) => {
     if (!email) return;
@@ -81,28 +134,53 @@ export const TicketsManager: React.FC = () => {
   const resolvedCount = tickets.filter(t => ['resolved', 'success'].includes((t.status || '').toLowerCase())).length;
   const closedCount = tickets.filter(t => (t.status || '').toLowerCase() === 'closed').length;
 
-  // Filter & Search
-  const filteredTickets = tickets.filter(ticket => {
-    const statusCleaned = (ticket.status || '').toLowerCase().trim();
-    
-    // 1. Status filter
-    let matchesFilter = true;
-    if (activeFilter === 'open') matchesFilter = statusCleaned === 'open';
-    else if (activeFilter === 'pending') matchesFilter = statusCleaned === 'pending';
-    else if (activeFilter === 'resolved') matchesFilter = ['resolved', 'success'].includes(statusCleaned);
-    else if (activeFilter === 'closed') matchesFilter = statusCleaned === 'closed';
+  // Filter & Search (debounced; includes phone + user id)
+  const filteredTickets = useMemo(() => {
+    const query = debouncedQuery.toLowerCase().trim();
+    return tickets.filter(ticket => {
+      const statusCleaned = (ticket.status || '').toLowerCase().trim();
 
-    // 2. Search query filter
-    const query = searchQuery.toLowerCase().trim();
-    const matchesSearch = !query ? true : (
-      (ticket.subject || '').toLowerCase().includes(query) ||
-      (ticket.message || '').toLowerCase().includes(query) ||
-      (ticket.email || '').toLowerCase().includes(query) ||
-      (ticket.profiles?.display_name || '').toLowerCase().includes(query)
+      // 1. Status filter
+      let matchesFilter = true;
+      if (activeFilter === 'open') matchesFilter = statusCleaned === 'open';
+      else if (activeFilter === 'pending') matchesFilter = statusCleaned === 'pending';
+      else if (activeFilter === 'resolved') matchesFilter = ['resolved', 'success'].includes(statusCleaned);
+      else if (activeFilter === 'closed') matchesFilter = statusCleaned === 'closed';
+
+      // 2. Search query filter
+      const matchesSearch = !query ? true : (
+        (ticket.subject || '').toLowerCase().includes(query) ||
+        (ticket.message || '').toLowerCase().includes(query) ||
+        (ticket.email || '').toLowerCase().includes(query) ||
+        (ticket.profiles?.display_name || '').toLowerCase().includes(query) ||
+        (ticket.profiles?.phone || '').toLowerCase().includes(query) ||
+        (ticket.user_id || '').toLowerCase().includes(query)
+      );
+
+      return matchesFilter && matchesSearch;
+    });
+  }, [tickets, debouncedQuery, activeFilter]);
+
+  const totalPages = Math.max(Math.ceil(filteredTickets.length / pageSize), 1);
+  const safePage = Math.min(page, totalPages);
+  const pagedTickets = filteredTickets.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  const handleExportCsv = () => {
+    const statusFa: Record<string, string> = { open: 'باز', pending: 'در انتظار', resolved: 'حل‌شده', closed: 'بسته' };
+    exportToCsv(
+      `tickets-${new Date().toISOString().slice(0, 10)}`,
+      ['موضوع', 'وضعیت', 'ایمیل', 'موبایل', 'تاریخ ثبت', 'پاسخ داده شده'],
+      filteredTickets.map(t => [
+        t.subject || '',
+        statusFa[(t.status || '').toLowerCase()] || t.status || '',
+        t.email || '',
+        t.profiles?.phone || '',
+        formatFaDateTime(t.created_at),
+        t.admin_reply ? 'بله' : 'خیر',
+      ]),
     );
-
-    return matchesFilter && matchesSearch;
-  });
+    toast.success('فایل CSV تیکت‌ها دانلود شد.');
+  };
 
   return (
     <motion.div
@@ -124,16 +202,27 @@ export const TicketsManager: React.FC = () => {
           </p>
         </div>
         
-        <Button
-          id="refresh-tickets-btn"
-          variant="secondary"
-          onClick={fetchTicketsList}
-          isLoading={loading}
-          icon={<RefreshCw className="w-4 h-4" />}
-          className="self-start md:self-auto"
-        >
-          به‌روزرسانی لیست
-        </Button>
+        <div className="flex items-center gap-2 self-start md:self-auto">
+          <Button
+            id="export-tickets-btn"
+            variant="secondary"
+            onClick={handleExportCsv}
+            icon={<Download className="w-4 h-4" />}
+            className="self-start md:self-auto"
+          >
+            خروجی CSV
+          </Button>
+          <Button
+            id="refresh-tickets-btn"
+            variant="secondary"
+            onClick={() => fetchTicketsList(true)}
+            isLoading={loading}
+            icon={<RefreshCw className="w-4 h-4" />}
+            className="self-start md:self-auto"
+          >
+            به‌روزرسانی لیست
+          </Button>
+        </div>
       </div>
 
       {/* Stats Bento Grid */}
@@ -280,6 +369,8 @@ export const TicketsManager: React.FC = () => {
           <LoadingSpinner id="tickets-spinner" />
           <p className="text-xs text-slate-400 mt-4">در حال واکشی اطلاعات تیکت‌های پشتیبانی هکسر...</p>
         </div>
+      ) : loadError ? (
+        <ErrorPanel id="tickets-error-panel" message={loadError} onRetry={() => fetchTicketsList()} />
       ) : filteredTickets.length === 0 ? (
         <div id="tickets-empty-panel" className="flex flex-col items-center justify-center py-16 bg-slate-900/20 border border-white/5 rounded-2xl text-center">
           <HelpCircle className="w-12 h-12 text-slate-600 mb-3" />
@@ -287,13 +378,10 @@ export const TicketsManager: React.FC = () => {
           <p className="text-xs text-slate-500 mt-1.5">شما می‌توانید معیار فیلتر یا واژه‌های جستجوی خود را تغییر دهید</p>
         </div>
       ) : (
-        <div id="tickets-list-wrapper" className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredTickets.map((ticket, index) => {
-            const PersianDate = new Date(ticket.created_at).toLocaleDateString('fa-IR', {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            });
+        <div id="tickets-list-wrapper" className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {pagedTickets.map((ticket, index) => {
+            const PersianDate = formatFaDate(ticket.created_at);
 
             return (
               <motion.div
@@ -310,8 +398,11 @@ export const TicketsManager: React.FC = () => {
                 >
                   <div className="space-y-3">
                     {/* Top status & date row */}
-                    <div className="flex items-center justify-between">
-                      {getStatusBadge(ticket.status)}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        {getStatusBadge(ticket.status)}
+                        {ticket.admin_reply && <Badge variant="success">پاسخ داده شده</Badge>}
+                      </div>
                       <span className="text-[10px] text-slate-500 font-bold font-sans flex items-center space-x-1 space-x-reverse">
                         <Clock className="w-3 h-3 text-slate-500" />
                         <span>{PersianDate}</span>
@@ -360,6 +451,16 @@ export const TicketsManager: React.FC = () => {
             );
           })}
         </div>
+        <Pagination
+          id="tickets-pagination"
+          page={safePage}
+          totalPages={totalPages}
+          totalItems={filteredTickets.length}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+        />
+        </div>
       )}
 
       {/* Premium ticket diagnostic detail view Modal */}
@@ -390,13 +491,7 @@ export const TicketsManager: React.FC = () => {
                 <Clock className="w-4 h-4 text-brand-400" />
                 <span>ارسال شده در تاریخ:</span>
                 <span className="font-bold text-slate-300 font-sans">
-                  {new Date(selectedTicket.created_at).toLocaleDateString('fa-IR', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
+                  {formatFaDateTime(selectedTicket.created_at)}
                 </span>
               </div>
             </div>
@@ -443,13 +538,55 @@ export const TicketsManager: React.FC = () => {
               </div>
             </div>
 
-            {/* Read-Only action banner */}
-            <div className="p-3 px-4 bg-slate-800/40 border border-slate-700/50 rounded-xl flex items-start space-x-2.5 space-x-reverse text-slate-400">
-              <Mail className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
-              <p className="text-[11px] leading-relaxed">
-                برای فرستادن پاسخ، لطفاً با کلیک روی دکمه{' '}
-                <strong className="text-slate-300">کپی شناسه تماس</strong>، شناسه تماس (ایمیل/موبایل) کاربر را کپی کرده و از طریق وب‌میل یا تماس پیگیری کنید.
-              </p>
+            {/* Admin reply + status form (replaces read-only webmail banner) */}
+            <div className="space-y-3 pt-2 border-t border-white/5">
+              <span className="text-xs font-bold text-slate-300">پاسخ ادمین و تغییر وضعیت</span>
+
+              {selectedTicket.admin_reply && (
+                <div className="bg-emerald-500/[0.06] border border-emerald-500/20 p-4 rounded-2xl text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
+                  <p className="text-[10px] text-emerald-400 font-bold mb-1.5">
+                    پاسخ ثبت‌شده{selectedTicket.replied_at ? ` • ${formatFaDateTime(selectedTicket.replied_at)}` : ''}
+                  </p>
+                  {selectedTicket.admin_reply}
+                </div>
+              )}
+
+              <textarea
+                id="ticket-admin-reply"
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                rows={4}
+                maxLength={5000}
+                placeholder="متن پاسخ به کاربر را اینجا بنویسید..."
+                className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/60 rounded-xl px-4 py-3 text-xs text-slate-100 placeholder-slate-500 leading-relaxed resize-y"
+              />
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <select
+                  id="ticket-status-select"
+                  value={replyStatus}
+                  onChange={(e) => setReplyStatus(e.target.value as TicketStatus)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 px-3 py-2.5 focus:outline-none focus:border-brand-500 cursor-pointer"
+                  aria-label="وضعیت تیکت"
+                >
+                  <option value="open">باز</option>
+                  <option value="pending">در انتظار پاسخ</option>
+                  <option value="resolved">حل‌شده</option>
+                  <option value="closed">بسته</option>
+                </select>
+
+                <Button
+                  id="ticket-save-reply-btn"
+                  variant="primary"
+                  size="sm"
+                  onClick={handleSaveReply}
+                  isLoading={isSaving}
+                  icon={<Send className="w-3.5 h-3.5" />}
+                  className="sm:mr-auto"
+                >
+                  ثبت پاسخ و وضعیت
+                </Button>
+              </div>
             </div>
           </div>
         )}

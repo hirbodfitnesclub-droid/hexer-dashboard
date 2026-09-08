@@ -12,7 +12,9 @@ import {
   User,
   Bell,
   MessageSquare,
-  TrendingUp
+  TrendingUp,
+  Settings,
+  ScrollText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -32,6 +34,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { id: 'discounts' as ActiveTab, label: 'کدهای تخفیف', icon: Tag },
     { id: 'tickets' as ActiveTab, label: 'تیکت‌های پشتیبانی', icon: MessageSquare },
     { id: 'marketing' as ActiveTab, label: 'تحلیل مارکتینگ', icon: TrendingUp },
+    { id: 'settings' as ActiveTab, label: 'تنظیمات', icon: Settings },
+    { id: 'logs' as ActiveTab, label: 'لاگ فعالیت', icon: ScrollText },
   ];
 
   const handleTabClick = (tabId: ActiveTab) => {
