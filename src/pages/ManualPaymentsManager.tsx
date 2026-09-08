@@ -295,10 +295,10 @@ export const ManualPaymentsManager: React.FC = () => {
                           <UserAvatar 
                             id={`user-avatar-${pay.id}`} 
                             avatarUrl={userProfile?.avatar_url} 
-                            fallbackName={userProfile?.display_name || userProfile?.phone || 'کاربر'} 
+                            fallbackName={userProfile?.display_name || 'کاربر'} 
                           />
                           <div>
-                            <h4 className="font-bold text-slate-200">{userProfile?.display_name || userProfile?.phone || userProfile?.email || 'اسم نامشخص'}</h4>
+                            <h4 className="font-bold text-slate-200">{userProfile?.display_name || 'اسم نامشخص'}</h4>
                             <p className="text-[10px] text-slate-500 mt-0.5">{[userProfile?.email, userProfile?.phone].filter(Boolean).join(' • ') || pay.user_id}</p>
                           </div>
                         </div>
