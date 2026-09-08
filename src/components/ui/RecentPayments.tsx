@@ -41,7 +41,7 @@ export const RecentPayments: React.FC<RecentPaymentsProps> = ({
                 <td className="py-3.5">
                   <div className="flex items-center space-x-2 space-x-reverse">
                     <span className="text-xs font-bold text-slate-200">
-                      {payment.profiles?.display_name || payment.profiles?.email || 'کاربر هکسر'}
+                      {payment.profiles?.display_name || payment.profiles?.phone || payment.profiles?.email || 'کاربر هکسر'}
                     </span>
                   </div>
                 </td>

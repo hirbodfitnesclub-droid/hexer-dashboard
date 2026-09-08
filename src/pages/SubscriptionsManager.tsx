@@ -64,7 +64,8 @@ export const SubscriptionsManager: React.FC = () => {
   const filteredSubscriptions = subscriptions.filter(sub => {
     const nameStr = (sub.profiles?.display_name || '').toLowerCase();
     const emailStr = (sub.profiles?.email || '').toLowerCase();
-    const matchesSearch = nameStr.includes(searchQuery.toLowerCase()) || emailStr.includes(searchQuery.toLowerCase()) || sub.id.includes(searchQuery);
+    const phoneStr = (sub.profiles?.phone || '').toLowerCase();
+    const matchesSearch = nameStr.includes(searchQuery.toLowerCase()) || emailStr.includes(searchQuery.toLowerCase()) || phoneStr.includes(searchQuery.toLowerCase()) || sub.id.includes(searchQuery);
 
     const matchesPlan = activePlanFilter === 'all' || sub.plan_id === activePlanFilter;
     const matchesStatus = activeStatusFilter === 'all' || sub.status === activeStatusFilter;

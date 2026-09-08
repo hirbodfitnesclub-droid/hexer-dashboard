@@ -75,9 +75,10 @@ export const UsersManager: React.FC = () => {
   const filteredProfiles = profiles.filter(profile => {
     const nameMatch = (profile.display_name || '').toLowerCase().includes(searchQuery.toLowerCase());
     const emailMatch = (profile.email || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const phoneMatch = (profile.phone || '').toLowerCase().includes(searchQuery.toLowerCase());
     const idMatch = (profile.id || '').toLowerCase().includes(searchQuery.toLowerCase());
     
-    const matchesSearch = nameMatch || emailMatch || idMatch;
+    const matchesSearch = nameMatch || emailMatch || phoneMatch || idMatch;
 
     if (activeFilter === 'all') return matchesSearch;
     if (activeFilter === 'blocked') return matchesSearch && profile.is_blocked;

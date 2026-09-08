@@ -22,9 +22,9 @@ export const UserRow: React.FC<UserRowProps> = ({
           <UserAvatar displayName={profile.display_name} avatarUrl={profile.avatar_url} size="md" />
           <div className="flex flex-col">
             <span id={`row-display-name-${profile.id}`} className="text-xs font-bold text-slate-100 group-hover:text-brand-400 transition-colors">
-              {profile.display_name || 'کاربر بدون نام'}
+              {profile.display_name || profile.phone || profile.email || 'کاربر بدون نام'}
             </span>
-            <span id={`row-email-${profile.id}`} className="text-[10px] text-slate-500 font-mono mt-0.5 mt-px">{profile.email || 'بدون ایمیل / موبایل'}</span>
+            <span id={`row-email-${profile.id}`} className="text-[10px] text-slate-500 font-mono mt-0.5 mt-px">{[profile.email, profile.phone].filter(Boolean).join(' • ') || 'بدون ایمیل / موبایل'}</span>
           </div>
         </div>
       </td>

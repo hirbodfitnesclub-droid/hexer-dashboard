@@ -8,6 +8,27 @@ declare const Deno: any;
 const LIST_LIMIT = 500;
 const listQuery = <T extends { limit: (n: number) => T }>(query: T) => query.limit(LIST_LIMIT);
 
+// Helper: fetch all auth users (paged) so list endpoints can attach
+// email/phone to their profile DTOs without N+1 getUserById calls.
+async function fetchAllAuthUsers(supabaseService: any): Promise<any[]> {
+  const users: any[] = [];
+  let page = 1;
+  for (;;) {
+    const { data, error } = await supabaseService.auth.admin.listUsers({ page, perPage: 500 });
+    if (error) throw error;
+    users.push(...(data?.users ?? []));
+    const totalPages = Math.ceil((data?.total ?? 0) / 500);
+    if ((data?.users ?? []).length === 0 || page >= totalPages || page >= 10) break;
+    page += 1;
+  }
+  return users;
+}
+
+function contactOf(users: any[], userId: string): { email: string; phone: string } {
+  const u = users.find((x: any) => x.id === userId);
+  return { email: u?.email || '', phone: u?.phone || '' };
+}
+
 Deno.serve(async (req: Request) => {
   const corsHeaders = getAllowedCorsHeaders(req);
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
@@ -85,16 +106,7 @@ Deno.serve(async (req: Request) => {
           .select('*')
           .order('created_at', { ascending: false }));
         if (pErr) throw pErr;
-        const users: any[] = [];
-        let page = 1;
-        for (;;) {
-          const { data, error: uErr } = await supabaseService.auth.admin.listUsers({ page, perPage: 500 });
-          if (uErr) throw uErr;
-          users.push(...(data?.users ?? []));
-          const totalPages = Math.ceil((data?.total ?? 0) / 500);
-          if ((data?.users ?? []).length === 0 || page >= totalPages || page >= 10) break;
-          page += 1;
-        }
+        const users = await fetchAllAuthUsers(supabaseService);
         const profileDTOs = (profiles || []).map((p: any) => {
           const authUser = users.find((u: any) => u.id === p.id);
           const isBlocked = authUser?.banned_until
@@ -103,6 +115,7 @@ Deno.serve(async (req: Request) => {
           return {
             id: p.id,
             email: authUser?.email || authUser?.phone || '',
+            phone: authUser?.phone || '',
             display_name: p.full_name || '',
             avatar_url: p.avatar_url || null,
             is_blocked: isBlocked,
@@ -145,13 +158,15 @@ Deno.serve(async (req: Request) => {
         }
         const { data: plans, error: plErr } = await supabaseService.from('plans').select('*');
         if (plErr) throw plErr;
+        const users = await fetchAllAuthUsers(supabaseService);
         const subDTOs = (subs || []).map((sub: any) => {
           const profile = (profiles || []).find((p: any) => p.id === sub.user_id);
           const plan = (plans || []).find((p: any) => p.plan_code === sub.plan_code);
+          const contact = contactOf(users, sub.user_id);
           return {
             id: sub.id, user_id: sub.user_id, plan_id: sub.plan_code, status: sub.status,
             expires_at: sub.expires_at, created_at: sub.started_at,
-            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at } : null,
+            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at, email: contact.email, phone: contact.phone } : null,
             plans: plan ? { id: plan.plan_code, name: plan.display_name, price: Number(plan.price_irr), ai_tokens_limit: plan.monthly_quota } : null
           };
         });
@@ -187,14 +202,16 @@ Deno.serve(async (req: Request) => {
             if (!error && data) coupons = data;
           } catch (err) { console.warn('Could not retrieve discount_codes defensively:', err); }
         }
+        const users = await fetchAllAuthUsers(supabaseService);
         const paymentDTOs = (payments || []).map((pay: any) => {
           const profile = (profiles || []).find((p: any) => p.id === pay.user_id);
           const coupon = coupons.find((c: any) => c.id === pay.discount_code_id);
+          const contact = contactOf(users, pay.user_id);
           return {
             id: pay.id, user_id: pay.user_id, amount: Number(pay.final_amount_irr || pay.amount_irr || 0),
             status: pay.status === 'paid' ? 'success' : pay.status === 'failed' ? 'failed' : 'pending',
             coupon_code: coupon ? coupon.code : null, created_at: pay.created_at,
-            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at } : null
+            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at, email: contact.email, phone: contact.phone } : null
           };
         });
         return new Response(JSON.stringify(paymentDTOs), {
@@ -238,9 +255,11 @@ Deno.serve(async (req: Request) => {
           if (profileErr) throw profileErr;
           if (pData) profiles = pData;
         }
+        const users = await fetchAllAuthUsers(supabaseService);
         const paymentDTOs = [];
         for (const pay of (payments || [])) {
           const profile = (profiles || []).find((p: any) => p.id === pay.user_id);
+          const contact = contactOf(users, pay.user_id);
           let receiptPath = pay.offline_receipt_url || '';
           if (receiptPath.includes('/receipts/')) receiptPath = receiptPath.split('/receipts/')[1];
           let signedUrl = null;
@@ -253,7 +272,7 @@ Deno.serve(async (req: Request) => {
           paymentDTOs.push({
             id: pay.id, user_id: pay.user_id, amount: Number(pay.final_amount_irr || pay.amount_irr || 0),
             status: 'pending_manual', receipt_signed_url: signedUrl, created_at: pay.created_at,
-            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at } : null
+            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at, email: contact.email, phone: contact.phone } : null
           });
         }
         return new Response(JSON.stringify(paymentDTOs), {
@@ -320,7 +339,7 @@ Deno.serve(async (req: Request) => {
           return {
             id: ticket.id, user_id: ticket.user_id, subject: ticket.subject, message: ticket.message,
             status: ticket.status, created_at: ticket.created_at,
-            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at } : null,
+            profiles: profile ? { id: profile.id, display_name: profile.full_name || '', avatar_url: profile.avatar_url, created_at: profile.created_at, email: authUser?.email || '', phone: authUser?.phone || '' } : null,
             email: authUser?.email || authUser?.phone || ''
           };
         });

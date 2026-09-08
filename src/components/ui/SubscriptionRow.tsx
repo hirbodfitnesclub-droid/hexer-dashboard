@@ -38,10 +38,10 @@ export const SubscriptionRow: React.FC<SubscriptionRowProps> = ({
           />
           <div className="flex flex-col">
             <span id={`sub-name-${subscription.id}`} className="text-xs font-bold text-slate-100 group-hover:text-brand-400 transition-colors">
-              {subscription.profiles?.display_name || 'کاربر بدون نام'}
+              {subscription.profiles?.display_name || subscription.profiles?.phone || subscription.profiles?.email || 'کاربر بدون نام'}
             </span>
             <span id={`sub-email-${subscription.id}`} className="text-[10px] text-slate-500 font-mono mt-0.5 mt-px">
-              {subscription.profiles?.email || 'بدون ایمیل / موبایل'}
+              {[subscription.profiles?.email, subscription.profiles?.phone].filter(Boolean).join(' • ') || 'بدون ایمیل / موبایل'}
             </span>
           </div>
         </div>
